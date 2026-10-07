@@ -1,0 +1,7 @@
+{
+  "name": "Contributo — University Academic Resource Hub",
+  "description": "A student-to-student academic resource sharing platform for university students to organize and share useful YouTube videos and playlists by course blocks.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
