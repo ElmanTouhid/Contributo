@@ -1,0 +1,6 @@
+{
+  "name": "Contributo — Student Academic Resource Sharing",
+  "description": "Collaborative student academic resource platform organized by official university course syllabi and segments.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
