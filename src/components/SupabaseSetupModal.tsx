@@ -210,7 +210,7 @@ export const SupabaseSetupModal: React.FC<SupabaseSetupModalProps> = ({
             <div className="flex items-center gap-2">
               <Layers className="w-4 h-4 text-amber-700" />
               <h4 className="text-xs font-bold uppercase tracking-wider text-amber-900">
-                1-Click Supabase SQL Setup Script
+                Verified Security Migration & RLS Guide
               </h4>
             </div>
             <button
@@ -223,17 +223,14 @@ export const SupabaseSetupModal: React.FC<SupabaseSetupModalProps> = ({
                 </>
               ) : (
                 <>
-                  <Copy className="w-3.5 h-3.5 text-amber-700" /> Copy SQL
+                  <Copy className="w-3.5 h-3.5 text-amber-700" /> Copy Notice
                 </>
               )}
             </button>
           </div>
           <p className="text-xs text-stone-600 mb-3">
-            Creates the 4 tables (<code className="font-mono text-stone-800">segments</code>,{' '}
-            <code className="font-mono text-stone-800">youtube_resources</code>,{' '}
-            <code className="font-mono text-stone-800">file_resources</code>,{' '}
-            <code className="font-mono text-stone-800">reports</code>) and the{' '}
-            <code className="font-mono text-stone-800">course-files</code> storage bucket.
+            Database tables, immutable syllabus segments, storage policies, and RPC registration functions
+            are configured using the verified SQL migration in your Supabase SQL Editor.
           </p>
           <div className="relative">
             <pre className="max-h-36 overflow-y-auto p-3 bg-stone-900 text-stone-200 text-[11px] font-mono rounded-lg leading-relaxed select-all">

@@ -8,14 +8,14 @@ import {
   X
 } from 'lucide-react';
 import { uploadAndAddFileResource } from '../lib/supabase';
-import { Segment, StudentProfile } from '../types';
+import { Segment, RegisteredStudent } from '../types';
 
 interface ShareFileModalProps {
   isOpen: boolean;
   onClose: () => void;
   segment: Segment;
   courseId: string;
-  currentStudent: StudentProfile;
+  currentUser: RegisteredStudent;
   onResourceAdded: () => void;
 }
 
@@ -27,7 +27,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
   onClose,
   segment,
   courseId,
-  currentStudent,
+  currentUser,
   onResourceAdded,
 }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -99,8 +99,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
       segmentId: segment.id,
       title: title.trim(),
       description: description.trim(),
-      contributorId: currentStudent.id,
-      contributorName: currentStudent.displayName,
+      contributorName: currentUser.displayName,
     });
 
     setIsUploading(false);
@@ -228,7 +227,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
           <div className="bg-amber-50/80 border border-amber-200/90 rounded-xl p-3 text-[11px] text-amber-900 flex items-center justify-between">
             <span className="flex items-center gap-1.5 font-medium">
               <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-              Uploaded as: <span className="font-bold underline decoration-amber-400">Shared by {currentStudent.displayName}</span>
+              Uploaded as: <span className="font-bold underline decoration-amber-400">Shared by {currentUser.displayName}</span>
             </span>
             <span className="text-stone-500 text-[10px]">Student ID kept private</span>
           </div>

@@ -16,7 +16,7 @@ export const YouTubeResourceCard: React.FC<YouTubeResourceCardProps> = ({
   onReport,
 }) => {
   const isPlaylist = resource.resource_type === 'playlist';
-  const isOwner = resource.contributor_id === currentUserId;
+  const isOwner = Boolean(currentUserId && resource.contributor_id === currentUserId);
 
   const formattedDate = new Date(resource.created_at).toLocaleDateString('en-US', {
     month: 'short',

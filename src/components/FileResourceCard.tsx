@@ -29,7 +29,7 @@ export const FileResourceCard: React.FC<FileResourceCardProps> = ({
   onPreview,
   onReport,
 }) => {
-  const isOwner = resource.contributor_id === currentUserId;
+  const isOwner = Boolean(currentUserId && resource.contributor_id === currentUserId);
   const ext = (resource.file_type || '').toLowerCase();
 
   const isPreviewable = ['pdf', 'png', 'jpg', 'jpeg', 'webp'].includes(ext);

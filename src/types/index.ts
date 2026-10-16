@@ -67,13 +67,21 @@ export interface Report {
   created_at?: string;
 }
 
+export interface RegisteredStudent {
+  userId: string;
+  universityEmail: string;
+  studentId: string;
+  displayName: string;
+  createdAt?: string;
+}
+
 export interface StudentProfile {
   id: string;
   displayName: string;
   universityId: string; // kept private, never displayed on resources
-  department: string;
-  semester: string;
-  avatarColor: string;
+  department?: string;
+  semester?: string;
+  avatarColor?: string;
 }
 
 export interface SegmentResourceCount {

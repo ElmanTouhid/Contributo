@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { AlertCircle, CheckCircle2, Film, ListVideo, Sparkles, Video, X } from 'lucide-react';
 import { addYouTubeResource, parseYouTubeUrl } from '../lib/supabase';
-import { ResourceType, Segment, StudentProfile } from '../types';
+import { ResourceType, Segment, RegisteredStudent } from '../types';
 
 interface ShareYouTubeModalProps {
   isOpen: boolean;
   onClose: () => void;
   segment: Segment;
   courseId: string;
-  currentStudent: StudentProfile;
+  currentUser: RegisteredStudent;
   onResourceAdded: () => void;
 }
 
@@ -17,7 +17,7 @@ export const ShareYouTubeModal: React.FC<ShareYouTubeModalProps> = ({
   onClose,
   segment,
   courseId,
-  currentStudent,
+  currentUser,
   onResourceAdded,
 }) => {
   const [url, setUrl] = useState('');
@@ -84,8 +84,8 @@ export const ShareYouTubeModal: React.FC<ShareYouTubeModalProps> = ({
       title: title.trim(),
       topic: topic.trim(),
       description: description.trim(),
-      contributor_id: currentStudent.id,
-      contributor_name: currentStudent.displayName,
+      contributor_id: currentUser.userId,
+      contributor_name: currentUser.displayName,
     });
 
     setIsSubmitting(false);
@@ -225,7 +225,7 @@ export const ShareYouTubeModal: React.FC<ShareYouTubeModalProps> = ({
           <div className="bg-amber-50/80 border border-amber-200/90 rounded-xl p-3 text-[11px] text-amber-900 flex items-center justify-between">
             <span className="flex items-center gap-1.5 font-medium">
               <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-              Will be published as: <span className="font-bold underline decoration-amber-400">Shared by {currentStudent.displayName}</span>
+              Will be published as: <span className="font-bold underline decoration-amber-400">Shared by {currentUser.displayName}</span>
             </span>
             <span className="text-stone-500 text-[10px]">Student ID is kept private</span>
           </div>

@@ -9,18 +9,25 @@ import { SupabaseSetupBanner, SupabaseSetupModal } from './components/SupabaseSe
 import { SyllabusInfoView } from './components/SyllabusInfoView';
 import { COURSES } from './data/courses';
 import { SYLLABUS_SEGMENTS } from './data/syllabusSegments';
-import { getCurrentStudent } from './lib/auth';
+import {
+  completePendingRegistration,
+  fetchRegisteredStudent
+} from './lib/auth';
 import {
   fetchAllSegments,
   fetchCourseLiveCounts,
   fetchSegmentLiveCounts,
+  getSupabase,
   isSupabaseConfigured
 } from './lib/supabase';
-import { Course, Segment, StudentProfile } from './types';
+import { Course, RegisteredStudent, Segment } from './types';
 
 export default function App() {
-  // Current Student
-  const [currentStudent, setCurrentStudent] = useState<StudentProfile>(getCurrentStudent);
+  // Authenticated Student Profile (from public.registered_students)
+  const [currentUser, setCurrentUser] = useState<RegisteredStudent | null>(null);
+  // Active Supabase Auth Session (even if public.registered_students record is still pending)
+  const [authSessionUser, setAuthSessionUser] = useState<{ id: string; email: string } | null>(null);
+  const [initialStudentId, setInitialStudentId] = useState('');
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   // Supabase Setup Modal
@@ -59,6 +66,48 @@ export default function App() {
     });
   };
 
+  // Synchronize authenticated user state with Supabase Auth
+  const syncAuthState = async () => {
+    const supabase = getSupabase();
+    if (!supabase) {
+      setCurrentUser(null);
+      setAuthSessionUser(null);
+      return;
+    }
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        setCurrentUser(null);
+        setAuthSessionUser(null);
+        return;
+      }
+
+      const sessionEmail = session.user.email || '';
+      setAuthSessionUser({ id: session.user.id, email: sessionEmail });
+
+      // Check if user is already registered in public.registered_students
+      let profile = await fetchRegisteredStudent(session.user.id);
+      if (!profile) {
+        // Complete pending registration or detect cross-device manual completion
+        const pendingRes = await completePendingRegistration(session.user.id, sessionEmail);
+        if (pendingRes.success && pendingRes.profile) {
+          profile = pendingRes.profile;
+        } else if (pendingRes.requiresManualCompletion) {
+          if (pendingRes.suggestedStudentId) {
+            setInitialStudentId(pendingRes.suggestedStudentId);
+          }
+          // Open profile modal to show the authenticated registration-completion form
+          setIsProfileModalOpen(true);
+        }
+      }
+      setCurrentUser(profile);
+    } catch (err) {
+      console.error('Error synchronizing auth state:', err);
+      setCurrentUser(null);
+    }
+  };
+
   // Sync data and counts
   const loadDatabaseData = async () => {
     setIsSupabaseLive(isSupabaseConfigured());
@@ -78,7 +127,25 @@ export default function App() {
 
   useEffect(() => {
     loadDatabaseData();
-  }, []);
+    syncAuthState();
+
+    const supabase = getSupabase();
+    if (supabase) {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event) => {
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+          await syncAuthState();
+        } else if (event === 'SIGNED_OUT') {
+          setCurrentUser(null);
+          setAuthSessionUser(null);
+          setInitialStudentId('');
+        }
+      });
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    }
+  }, [isSupabaseLive]);
 
   // Compute total live resources across all 8 courses
   const totalLiveResources = useMemo(() => {
@@ -146,7 +213,8 @@ export default function App() {
 
       {/* Main Contributo Header */}
       <Navbar
-        currentStudent={currentStudent}
+        currentUser={currentUser}
+        authSessionUser={authSessionUser}
         isSupabaseLive={isSupabaseLive}
         onOpenSupabaseSetup={() => setIsSupabaseModalOpen(true)}
         onOpenProfile={() => setIsProfileModalOpen(true)}
@@ -166,9 +234,10 @@ export default function App() {
           <SegmentDetail
             course={selectedCourse}
             segment={selectedSegment}
-            currentStudent={currentStudent}
+            currentUser={currentUser}
             onBack={handleBackToSegments}
             onOpenSupabaseSetup={() => setIsSupabaseModalOpen(true)}
+            onOpenAuthModal={() => setIsProfileModalOpen(true)}
           />
         ) : selectedCourse ? (
           /* ================= Course Detail View (Segments List) ================= */
@@ -190,7 +259,7 @@ export default function App() {
           /* ================= Dashboard / Course Blocks View ================= */
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-fadeIn">
             <DashboardHero
-              currentStudent={currentStudent}
+              currentUser={currentUser}
               totalResources={totalLiveResources}
               totalSegments={segments.length}
               searchQuery={searchQuery}
@@ -295,14 +364,23 @@ export default function App() {
         onClose={() => setIsSupabaseModalOpen(false)}
         onCredentialsUpdated={() => {
           loadDatabaseData();
+          syncAuthState();
         }}
       />
 
       <StudentProfileModal
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
-        currentStudent={currentStudent}
-        onStudentChanged={(s) => setCurrentStudent(s)}
+        currentUser={currentUser}
+        authSessionUser={authSessionUser}
+        initialStudentId={initialStudentId}
+        onProfileUpdated={(s) => {
+          setCurrentUser(s);
+          if (!s) {
+            setAuthSessionUser(null);
+            setInitialStudentId('');
+          }
+        }}
       />
     </div>
   );
