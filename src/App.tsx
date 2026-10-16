@@ -11,7 +11,6 @@ import { COURSES } from './data/courses';
 import { SYLLABUS_SEGMENTS } from './data/syllabusSegments';
 import { getCurrentStudent } from './lib/auth';
 import {
-  ensureSegmentsSeeded,
   fetchAllSegments,
   fetchCourseLiveCounts,
   fetchSegmentLiveCounts,
@@ -63,10 +62,6 @@ export default function App() {
   // Sync data and counts
   const loadDatabaseData = async () => {
     setIsSupabaseLive(isSupabaseConfigured());
-
-    if (isSupabaseConfigured()) {
-      await ensureSegmentsSeeded();
-    }
 
     const [allSegments, cCounts, sCounts] = await Promise.all([
       fetchAllSegments(),
