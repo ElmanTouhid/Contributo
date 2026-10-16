@@ -12,12 +12,12 @@ export interface PendingRegistration {
 
 /**
  * Validates IIUC university student email format:
- * Exactly c followed by 6 digits @ugrad.iiuc.ac.bd (e.g. c253124@ugrad.iiuc.ac.bd)
+ * Exactly c followed by 6 digits @ugrad.iiuc.bd (e.g. c253124@ugrad.iiuc.bd)
  */
 export function validateIIUCEmail(email: string): boolean {
   if (!email) return false;
   const normalized = email.trim().toLowerCase();
-  return /^c[0-9]{6}@ugrad\.iiuc\.ac\.bd$/.test(normalized);
+  return /^c[0-9]{6}@ugrad\.iiuc\.bd$/.test(normalized);
 }
 
 /**
@@ -131,7 +131,7 @@ export async function sendMagicLink(params: {
   if (!validateIIUCEmail(email)) {
     return {
       success: false,
-      error: 'Invalid email. Only official IIUC student emails (cXXXXXX@ugrad.iiuc.ac.bd) are permitted.',
+      error: 'Invalid email. Only official IIUC student emails (cXXXXXX@ugrad.iiuc.bd) are permitted.',
     };
   }
 
@@ -145,7 +145,7 @@ export async function sendMagicLink(params: {
   if (!doEmailAndIdMatch(email, studentId)) {
     return {
       success: false,
-      error: 'Student ID does not match the university email number (e.g. C253124 must match c253124@ugrad.iiuc.ac.bd).',
+      error: 'Student ID does not match the university email number (e.g. C253124 must match c253124@ugrad.iiuc.bd).',
     };
   }
 
