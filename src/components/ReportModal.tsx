@@ -90,17 +90,17 @@ export const ReportModal: React.FC<ReportModalProps> = ({
         {!currentUser ? (
           <div className="py-4 space-y-4 text-center">
             <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-stone-700 leading-relaxed">
-              Only verified IIUC university students may submit resource reports to prevent spam and abuse.
+              Please register your Student ID before submitting resource reports to prevent spam and abuse.
             </div>
             <button
               onClick={() => {
                 onClose();
                 if (onOpenAuthModal) onOpenAuthModal();
               }}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
             >
               <LogIn className="w-4 h-4" />
-              <span>Sign In with University Email</span>
+              <span>Register Student ID</span>
             </button>
           </div>
         ) : status === 'success' ? (

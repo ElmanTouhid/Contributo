@@ -1,459 +1,364 @@
 import { getSupabase } from './supabase';
 import { RegisteredStudent } from '../types';
 
-const PENDING_REG_KEY = 'contributo_pending_registration';
-
-export interface PendingRegistration {
-  email: string;
-  studentId: string;
-  displayName: string;
-  timestamp: number;
-}
+const LOCAL_STUDENT_KEY = 'contributo_registered_student';
 
 /**
- * Validates IIUC university student email format:
- * Exactly c followed by 6 digits @ugrad.iiuc.ac.bd (e.g. c253124@ugrad.iiuc.ac.bd)
+ * Validates any standard email format worldwide.
+ * Does not require a university email domain.
  */
-export function validateIIUCEmail(email: string): boolean {
+export function validateEmail(email: string): boolean {
   if (!email) return false;
   const normalized = email.trim().toLowerCase();
-  return /^c[0-9]{6}@ugrad\.iiuc\.ac\.bd$/.test(normalized);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized);
 }
 
 /**
- * Validates IIUC university student ID format:
- * Exactly C followed by 6 digits (e.g. C253124)
+ * Backward compatibility alias.
+ */
+export function validateIIUCEmail(email: string): boolean {
+  return validateEmail(email);
+}
+
+/**
+ * Validates student ID format:
+ * Accepts any non-empty student ID (e.g. C253124, 21-45678-1, S102938, etc.)
  */
 export function validateStudentID(studentId: string): boolean {
   if (!studentId) return false;
-  const normalized = studentId.trim().toUpperCase();
-  return /^C[0-9]{6}$/.test(normalized);
+  const normalized = studentId.trim();
+  return normalized.length >= 2 && normalized.length <= 30;
 }
 
 /**
- * Validates that the 6 digits in the Student ID match the student number in the email.
+ * Checks whether email and ID match (kept for backward compatibility, returns true if valid).
  */
 export function doEmailAndIdMatch(email: string, studentId: string): boolean {
-  if (!validateIIUCEmail(email) || !validateStudentID(studentId)) {
-    return false;
+  return validateEmail(email) && validateStudentID(studentId);
+}
+
+/**
+ * Generates a valid RFC4122 v4 UUID string matching PostgreSQL's uuid column type.
+ */
+export function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
   }
-  const emailPrefix = email.trim().toLowerCase().split('@')[0];
-  const normalizedId = studentId.trim().toLowerCase();
-  return emailPrefix === normalizedId;
+  // RFC4122 v4 compliant fallback
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
 /**
- * Detects whether an RPC or table error indicates the database migration has not been applied yet.
+ * Validates if a string is a valid UUID.
  */
-export function isDatabaseMigrationError(errorMessage?: string): boolean {
-  if (!errorMessage) return false;
-  const msg = errorMessage.toLowerCase();
-  return (
-    (msg.includes('relation') && msg.includes('does not exist')) ||
-    (msg.includes('function') && msg.includes('does not exist')) ||
-    msg.includes('could not find the function') ||
-    msg.includes('schema cache')
-  );
+export function isValidUUID(id: string): boolean {
+  if (!id) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 }
 
 /**
- * Stores pending registration details in sessionStorage to survive magic-link redirect on the same device.
+ * Retrieves the currently registered student from localStorage.
+ * Auto-migrates any non-UUID legacy identifier to a valid UUID.
  */
-export function setPendingRegistration(email: string, studentId: string, displayName: string): void {
-  if (typeof window === 'undefined') return;
-  try {
-    const payload: PendingRegistration = {
-      email: email.trim().toLowerCase(),
-      studentId: studentId.trim().toUpperCase(),
-      displayName: displayName.trim(),
-      timestamp: Date.now(),
-    };
-    window.sessionStorage.setItem(PENDING_REG_KEY, JSON.stringify(payload));
-  } catch (err) {
-    console.error('Failed to save pending registration:', err);
-  }
-}
-
-/**
- * Retrieves pending registration details from sessionStorage.
- */
-export function getPendingRegistration(): PendingRegistration | null {
+export function getLocalStudent(): RegisteredStudent | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.sessionStorage.getItem(PENDING_REG_KEY);
+    const raw = window.localStorage.getItem(LOCAL_STUDENT_KEY);
     if (!raw) return null;
-    const data: PendingRegistration = JSON.parse(raw);
-    // Discard if older than 24 hours
-    if (Date.now() - data.timestamp > 24 * 60 * 60 * 1000) {
-      clearPendingRegistration();
-      return null;
+    const parsed = JSON.parse(raw) as Partial<RegisteredStudent>;
+    if (!parsed || !parsed.studentId) return null;
+
+    // Ensure email and universityEmail are synced
+    const emailVal = parsed.email || parsed.universityEmail || '';
+    let userId = parsed.userId || '';
+
+    // Auto-migrate legacy non-UUID IDs to a valid UUID
+    if (!isValidUUID(userId)) {
+      userId = generateUUID();
     }
-    return data;
+
+    const student: RegisteredStudent = {
+      userId,
+      email: emailVal,
+      universityEmail: emailVal,
+      studentId: parsed.studentId,
+      displayName: parsed.displayName || 'Student',
+      createdAt: parsed.createdAt || new Date().toISOString(),
+    };
+
+    // If userId was migrated or email synced, re-save
+    if (student.userId !== parsed.userId || student.email !== parsed.email) {
+      saveLocalStudent(student);
+    }
+
+    return student;
   } catch (err) {
-    console.error('Failed to parse pending registration:', err);
+    console.error('Failed to parse local registered student:', err);
     return null;
   }
 }
 
 /**
- * Clears pending registration details from sessionStorage.
+ * Saves registered student profile to localStorage.
  */
-export function clearPendingRegistration(): void {
+export function saveLocalStudent(student: RegisteredStudent): void {
   if (typeof window === 'undefined') return;
   try {
-    window.sessionStorage.removeItem(PENDING_REG_KEY);
+    const emailVal = student.email || student.universityEmail || '';
+    const toSave: RegisteredStudent = {
+      ...student,
+      email: emailVal,
+      universityEmail: emailVal,
+    };
+    window.localStorage.setItem(LOCAL_STUDENT_KEY, JSON.stringify(toSave));
   } catch (err) {
-    console.error('Failed to clear pending registration:', err);
+    console.error('Failed to save local student:', err);
   }
 }
 
 /**
- * Initiates the passwordless magic link flow with Supabase Auth.
+ * Clears registered student profile from localStorage.
  */
-export async function sendMagicLink(params: {
-  email: string;
-  studentId: string;
-  displayName: string;
-}): Promise<{ success: boolean; error?: string }> {
-  const supabase = getSupabase();
-  if (!supabase) {
-    return {
-      success: false,
-      error: 'Supabase is not configured. Please provide Supabase URL and Anon Key.',
-    };
-  }
-
-  const email = params.email.trim().toLowerCase();
-  const studentId = params.studentId.trim().toUpperCase();
-  const displayName = params.displayName.trim();
-
-  // Strict format validation
-  if (!validateIIUCEmail(email)) {
-    return {
-      success: false,
-      error: 'Invalid email. Only official IIUC student emails (cXXXXXX@ugrad.iiuc.ac.bd) are permitted.',
-    };
-  }
-
-  if (!validateStudentID(studentId)) {
-    return {
-      success: false,
-      error: 'Invalid student ID. ID must follow format CXXXXXX (e.g. C253124).',
-    };
-  }
-
-  if (!doEmailAndIdMatch(email, studentId)) {
-    return {
-      success: false,
-      error: 'Student ID does not match the university email number (e.g. C253124 must match c253124@ugrad.iiuc.ac.bd).',
-    };
-  }
-
-  if (displayName.length < 2 || displayName.length > 50) {
-    return {
-      success: false,
-      error: 'Public display name must be between 2 and 50 characters.',
-    };
-  }
-
-  // Preserve pending registration data in sessionStorage for return on same browser/device
-  setPendingRegistration(email, studentId, displayName);
-
+export function clearLocalStudent(): void {
+  if (typeof window === 'undefined') return;
   try {
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: window.location.origin,
-      },
-    });
-
-    if (error) {
-      clearPendingRegistration();
-      return { success: false, error: error.message };
-    }
-
-    return { success: true };
-  } catch (err: unknown) {
-    clearPendingRegistration();
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : 'Failed to send magic link.',
-    };
+    window.localStorage.removeItem(LOCAL_STUDENT_KEY);
+  } catch (err) {
+    console.error('Failed to clear local student:', err);
   }
 }
 
 /**
- * Fetches the registered student profile from public.registered_students for the given auth user.
+ * Fetches the active registered student.
+ * In a public system without Supabase Auth, client-supplied UUIDs do not prove ownership,
+ * and registered_students rows are not publicly queryable to protect student privacy.
  */
 export async function fetchRegisteredStudent(userId: string): Promise<RegisteredStudent | null> {
+  if (!userId) return null;
+  const local = getLocalStudent();
+  if (local && local.userId === userId) {
+    return local;
+  }
+  return null;
+}
+
+/**
+ * Safely fetches the total count of registered students without reading private rows.
+ */
+export async function fetchRegisteredStudentCount(): Promise<number | null> {
   const supabase = getSupabase();
-  if (!supabase || !userId) return null;
+  if (!supabase) return null;
 
   try {
-    const { data, error } = await supabase
-      .from('registered_students')
-      .select('user_id, university_email, student_id, display_name, created_at')
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (error) {
-      // If table does not exist, log once and return null
-      console.warn('fetchRegisteredStudent lookup note:', error.message);
-      return null;
+    // Secure RPC function: counts rows server-side without transferring any student details
+    const { data, error } = await supabase.rpc('get_registered_student_count');
+    if (!error && data !== null && data !== undefined) {
+      return Number(data);
     }
-
-    if (!data) return null;
-
-    return {
-      userId: data.user_id,
-      universityEmail: data.university_email,
-      studentId: data.student_id,
-      displayName: data.display_name,
-      createdAt: data.created_at,
-    };
-  } catch (err) {
-    console.error('Error fetching registered student profile:', err);
+    return null;
+  } catch {
     return null;
   }
 }
 
 /**
- * Registers an authenticated Supabase user by invoking the register_iiuc_student RPC.
- * Uses the authenticated user's confirmed email as the single source of truth.
+ * Public Registration:
+ * Registers a student directly in Supabase without passwords, magic links, OTPs, or Supabase Auth.
+ * 
+ * Works with actual schema:
+ *   user_id uuid
+ *   student_id text
+ *   email text
+ *   display_name text
+ *   created_at timestamptz
+ * 
+ * Enforces duplicate checks for email and student ID so users are not repeatedly counted.
+ * Does NOT return or modify any existing student's data if an email or student ID already exists.
  */
-export async function registerAuthenticatedStudent(params: {
+export async function registerPublicStudent(params: {
+  email: string;
   studentId: string;
   displayName: string;
 }): Promise<{
   success: boolean;
   profile?: RegisteredStudent;
   error?: string;
-  isMigrationMissing?: boolean;
 }> {
+  const normEmail = params.email.trim().toLowerCase();
+  const normId = params.studentId.trim().toUpperCase();
+  const normName = params.displayName.trim();
+
+  if (!normEmail) {
+    return { success: false, error: 'Please enter a valid email address.' };
+  }
+  if (!validateEmail(normEmail)) {
+    return { success: false, error: 'Please enter a valid email address (e.g. student@example.com).' };
+  }
+
+  if (!normId) {
+    return { success: false, error: 'Please enter your Student ID.' };
+  }
+  if (!validateStudentID(normId)) {
+    return { success: false, error: 'Student ID must be between 2 and 30 characters.' };
+  }
+
+  if (!normName || normName.length < 2 || normName.length > 50) {
+    return { success: false, error: 'Display name must be between 2 and 50 characters.' };
+  }
+
+  const candidateUserId = generateUUID();
   const supabase = getSupabase();
+
+  // If Supabase is not configured yet, save locally so preview/browsing works immediately
   if (!supabase) {
-    return { success: false, error: 'Supabase client is not configured.' };
-  }
-
-  const { data: authData } = await supabase.auth.getUser();
-  const user = authData.user;
-  if (!user || !user.email) {
-    return { success: false, error: 'No active authenticated session found. Please sign in.' };
-  }
-
-  const authenticatedEmail = user.email.trim().toLowerCase();
-  const normalizedId = params.studentId.trim().toUpperCase();
-  const trimmedName = params.displayName.trim();
-
-  // Validate format and match against authenticated email
-  if (!validateIIUCEmail(authenticatedEmail)) {
-    return {
-      success: false,
-      error: `Your authenticated email (${authenticatedEmail}) is not a valid IIUC student email.`,
+    const localProfile: RegisteredStudent = {
+      userId: candidateUserId,
+      email: normEmail,
+      universityEmail: normEmail,
+      studentId: normId,
+      displayName: normName,
+      createdAt: new Date().toISOString(),
     };
-  }
-
-  if (!validateStudentID(normalizedId)) {
-    return {
-      success: false,
-      error: 'Invalid student ID format. Format must be CXXXXXX (e.g. C253124).',
-    };
-  }
-
-  if (!doEmailAndIdMatch(authenticatedEmail, normalizedId)) {
-    return {
-      success: false,
-      error: `Student ID ${normalizedId} does not match your authenticated email (${authenticatedEmail}). The six digits must match.`,
-    };
-  }
-
-  if (trimmedName.length < 2 || trimmedName.length > 50) {
-    return {
-      success: false,
-      error: 'Public display name must be between 2 and 50 characters.',
-    };
+    saveLocalStudent(localProfile);
+    return { success: true, profile: localProfile };
   }
 
   try {
-    const { data, error } = await supabase.rpc('register_iiuc_student', {
-      p_student_id: normalizedId,
-      p_display_name: trimmedName,
+    // 1. Try atomic public registration RPC function
+    const { data: rpcRows, error: rpcError } = await supabase.rpc('register_public_student', {
+      p_email: normEmail,
+      p_student_id: normId,
+      p_display_name: normName,
+      p_user_id: candidateUserId,
     });
 
-    if (error) {
-      const isMissing = isDatabaseMigrationError(error.message);
-      return {
-        success: false,
-        isMigrationMissing: isMissing,
-        error: isMissing
-          ? "Database migration not yet applied: The 'register_iiuc_student' function does not exist in Supabase. Please execute the SQL migration in your Supabase SQL Editor."
-          : error.message,
-      };
+    if (rpcError) {
+      if (
+        rpcError.code === '23505' ||
+        rpcError.message?.toLowerCase().includes('already registered') ||
+        rpcError.message?.toLowerCase().includes('unique') ||
+        rpcError.message?.toLowerCase().includes('duplicate')
+      ) {
+        return {
+          success: false,
+          error: 'This email address or student ID is already registered.',
+        };
+      }
+      return { success: false, error: rpcError.message || 'Registration failed.' };
     }
 
-    clearPendingRegistration();
+    if (Array.isArray(rpcRows) && rpcRows.length > 0) {
+      const row = rpcRows[0] as unknown as {
+        user_id: string;
+        email: string;
+        student_id: string;
+        display_name: string;
+        created_at: string;
+      };
+      const profile: RegisteredStudent = {
+        userId: row.user_id,
+        email: row.email,
+        universityEmail: row.email,
+        studentId: row.student_id,
+        displayName: row.display_name,
+        createdAt: row.created_at,
+      };
+      saveLocalStudent(profile);
+      return { success: true, profile };
+    }
 
-    const profile = await fetchRegisteredStudent(user.id);
-    return {
-      success: true,
-      profile: profile || {
-        userId: user.id,
-        universityEmail: authenticatedEmail,
-        studentId: normalizedId,
-        displayName: trimmedName,
-      },
+    // 2. Direct table fallback if RPC is not yet created in Supabase
+    const newRow = {
+      user_id: candidateUserId,
+      email: normEmail,
+      student_id: normId,
+      display_name: normName,
+      created_at: new Date().toISOString(),
     };
+
+    const { error: insertError } = await supabase
+      .from('registered_students')
+      .insert([newRow]);
+
+    if (insertError) {
+      if (
+        insertError.code === '23505' ||
+        insertError.message?.toLowerCase().includes('unique') ||
+        insertError.message?.toLowerCase().includes('duplicate')
+      ) {
+        return {
+          success: false,
+          error: 'This email address or student ID is already registered.',
+        };
+      }
+      return { success: false, error: insertError.message };
+    }
+
+    const createdProfile: RegisteredStudent = {
+      userId: candidateUserId,
+      email: normEmail,
+      universityEmail: normEmail,
+      studentId: normId,
+      displayName: normName,
+      createdAt: newRow.created_at,
+    };
+
+    saveLocalStudent(createdProfile);
+    return { success: true, profile: createdProfile };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Registration failed.';
-    const isMissing = isDatabaseMigrationError(msg);
-    return {
-      success: false,
-      isMigrationMissing: isMissing,
-      error: isMissing
-        ? "Database migration not yet applied: The 'register_iiuc_student' function does not exist in Supabase. Please execute the SQL migration in your Supabase SQL Editor."
-        : msg,
-    };
+    console.error('Registration exception:', err);
+    return { success: false, error: msg };
   }
 }
 
 /**
- * Checks for pending registration, protects against cross-user mix-ups on shared devices,
- * and handles cross-device registration completion when sessionStorage is empty.
- */
-export async function completePendingRegistration(
-  userId: string,
-  authenticatedEmail: string
-): Promise<{
-  success: boolean;
-  profile?: RegisteredStudent;
-  requiresManualCompletion?: boolean;
-  suggestedStudentId?: string;
-  suggestedDisplayName?: string;
-  error?: string;
-  isMigrationMissing?: boolean;
-}> {
-  const supabase = getSupabase();
-  if (!supabase || !userId) {
-    return { success: false, error: 'Supabase client or user session unavailable.' };
-  }
-
-  // 1. Verify if already registered in registered_students table
-  const existing = await fetchRegisteredStudent(userId);
-  if (existing) {
-    clearPendingRegistration();
-    return { success: true, profile: existing };
-  }
-
-  const pending = getPendingRegistration();
-
-  // 2. Cross-Device Handling: If sessionStorage is empty (link opened on another device/browser)
-  if (!pending) {
-    let suggestedStudentId = '';
-    if (validateIIUCEmail(authenticatedEmail)) {
-      const numPart = authenticatedEmail.split('@')[0];
-      suggestedStudentId = numPart.toUpperCase();
-    }
-    return {
-      success: false,
-      requiresManualCompletion: true,
-      suggestedStudentId,
-      error: 'Please enter your Student ID and Display Name to complete registration.',
-    };
-  }
-
-  // 3. Prevent Cross-User Mix-ups: Verify pending email matches authenticated session
-  if (pending.email.toLowerCase() !== authenticatedEmail.toLowerCase()) {
-    console.warn(
-      'Discarding mismatched pending registration for email:',
-      pending.email,
-      'vs authenticated session:',
-      authenticatedEmail
-    );
-    clearPendingRegistration();
-
-    let suggestedStudentId = '';
-    if (validateIIUCEmail(authenticatedEmail)) {
-      const numPart = authenticatedEmail.split('@')[0];
-      suggestedStudentId = numPart.toUpperCase();
-    }
-    return {
-      success: false,
-      requiresManualCompletion: true,
-      suggestedStudentId,
-      error: 'Previous pending registration was for a different email. Please complete your registration.',
-    };
-  }
-
-  // 4. Verify that the pending studentId matches the confirmed session email
-  if (!doEmailAndIdMatch(authenticatedEmail, pending.studentId)) {
-    clearPendingRegistration();
-    return {
-      success: false,
-      requiresManualCompletion: true,
-      error: 'Stored Student ID did not match the authenticated university email.',
-    };
-  }
-
-  // 5. Pending data is verified against the authenticated session; invoke registration RPC
-  return registerAuthenticatedStudent({
-    studentId: pending.studentId,
-    displayName: pending.displayName,
-  });
-}
-
-/**
- * Updates the student's public display name via the secure RPC.
+ * Updates student's display name.
+ * Stored locally on the user's active client session.
+ * Does not perform unauthenticated database mutations because client UUIDs do not prove ownership.
  */
 export async function updateDisplayName(
-  newDisplayName: string
-): Promise<{ success: boolean; error?: string; isMigrationMissing?: boolean }> {
-  const supabase = getSupabase();
-  if (!supabase) {
-    return { success: false, error: 'Supabase is not configured.' };
-  }
-
+  newDisplayName: string,
+  _userId?: string
+): Promise<{ success: boolean; error?: string }> {
   const trimmed = newDisplayName.trim();
   if (trimmed.length < 2 || trimmed.length > 50) {
     return { success: false, error: 'Display name must be between 2 and 50 characters.' };
   }
 
-  try {
-    const { error } = await supabase.rpc('update_student_display_name', {
-      p_new_display_name: trimmed,
+  const local = getLocalStudent();
+  if (local) {
+    saveLocalStudent({
+      ...local,
+      displayName: trimmed,
     });
-
-    if (error) {
-      const isMissing = isDatabaseMigrationError(error.message);
-      return {
-        success: false,
-        isMigrationMissing: isMissing,
-        error: isMissing
-          ? "Database migration not yet applied: The 'update_student_display_name' RPC does not exist in Supabase."
-          : error.message,
-      };
-    }
-
-    return { success: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Failed to update display name.';
-    const isMissing = isDatabaseMigrationError(msg);
-    return {
-      success: false,
-      isMigrationMissing: isMissing,
-      error: isMissing
-        ? "Database migration not yet applied: The 'update_student_display_name' RPC does not exist in Supabase."
-        : msg,
-    };
   }
+
+  return { success: true };
 }
 
 /**
- * Signs out the current student from Supabase Auth.
+ * Signs out / switches student by clearing local storage.
  */
 export async function signOutStudent(): Promise<void> {
-  const supabase = getSupabase();
-  clearPendingRegistration();
-  if (supabase) {
-    await supabase.auth.signOut();
-  }
+  clearLocalStudent();
+}
+
+/**
+ * Backward compatibility stubs
+ */
+export async function completePendingRegistration() {
+  return { success: true };
+}
+
+export async function sendMagicLink() {
+  return { success: true };
+}
+
+export async function registerAuthenticatedStudent() {
+  return { success: true };
 }

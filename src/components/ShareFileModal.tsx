@@ -99,6 +99,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
       segmentId: segment.id,
       title: title.trim(),
       description: description.trim(),
+      contributorId: currentUser.userId,
       contributorName: currentUser.displayName,
     });
 

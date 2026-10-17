@@ -69,7 +69,8 @@ export interface Report {
 
 export interface RegisteredStudent {
   userId: string;
-  universityEmail: string;
+  email: string;
+  universityEmail: string; // backwards compatibility alias for existing components
   studentId: string;
   displayName: string;
   createdAt?: string;

@@ -1,26 +1,22 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
-  Database,
   Edit2,
   GraduationCap,
-  LogIn,
   LogOut,
   Mail,
   Save,
-  Send,
   ShieldCheck,
   UserCheck,
+  UserPlus,
   X
 } from 'lucide-react';
 import {
-  doEmailAndIdMatch,
-  registerAuthenticatedStudent,
-  sendMagicLink,
+  registerPublicStudent,
   signOutStudent,
   updateDisplayName,
-  validateIIUCEmail,
+  validateEmail,
   validateStudentID
 } from '../lib/auth';
 import { RegisteredStudent } from '../types';
@@ -29,9 +25,6 @@ interface StudentProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: RegisteredStudent | null;
-  authSessionUser?: { id: string; email: string } | null;
-  initialStudentId?: string;
-  initialDisplayName?: string;
   onProfileUpdated: (student: RegisteredStudent | null) => void;
 }
 
@@ -39,24 +32,14 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
   isOpen,
   onClose,
   currentUser,
-  authSessionUser,
-  initialStudentId = '',
-  initialDisplayName = '',
   onProfileUpdated,
 }) => {
-  // Guest Magic Link Form State
+  // Public Registration Form State
   const [email, setEmail] = useState('');
   const [studentId, setStudentId] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [statusMsg, setStatusMsg] = useState<{ text: string; isError: boolean; isMigrationError?: boolean } | null>(null);
-  const [linkSent, setLinkSent] = useState(false);
-
-  // Authenticated Completion Form State (Cross-device / missing sessionStorage)
-  const [completionStudentId, setCompletionStudentId] = useState('');
-  const [completionDisplayName, setCompletionDisplayName] = useState('');
-  const [isCompleting, setIsCompleting] = useState(false);
-  const [completionMsg, setCompletionMsg] = useState<{ text: string; isError: boolean; isMigrationError?: boolean } | null>(null);
+  const [statusMsg, setStatusMsg] = useState<{ text: string; isError: boolean } | null>(null);
 
   // Edit Display Name State (for registered students)
   const [isEditingName, setIsEditingName] = useState(false);
@@ -64,23 +47,10 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
   const [isSavingName, setIsSavingName] = useState(false);
   const [nameError, setNameError] = useState('');
 
-  // Sync pre-filled values when opening
-  useEffect(() => {
-    if (authSessionUser && !currentUser) {
-      // Derive suggested student ID from authenticated email prefix (e.g. c253124@ugrad.iiuc.ac.bd -> C253124)
-      const prefix = authSessionUser.email.split('@')[0];
-      const autoId = initialStudentId || (validateStudentID(prefix) ? prefix.toUpperCase() : '');
-      setCompletionStudentId(autoId);
-      if (initialDisplayName) {
-        setCompletionDisplayName(initialDisplayName);
-      }
-    }
-  }, [authSessionUser, currentUser, initialStudentId, initialDisplayName, isOpen]);
-
   if (!isOpen) return null;
 
-  // 1. Guest: Request Magic Link
-  const handleSendMagicLink = async (e: React.FormEvent) => {
+  // Handle Public Registration Form
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatusMsg(null);
 
@@ -89,32 +59,24 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
     const normName = displayName.trim();
 
     if (!normEmail) {
-      setStatusMsg({ text: 'Please enter your IIUC student email.', isError: true });
+      setStatusMsg({ text: 'Please enter your email address.', isError: true });
       return;
     }
-    if (!validateIIUCEmail(normEmail)) {
+    if (!validateEmail(normEmail)) {
       setStatusMsg({
-        text: 'Invalid email format. Format must be cXXXXXX@ugrad.iiuc.ac.bd (e.g. c253124@ugrad.iiuc.ac.bd).',
+        text: 'Please enter a valid email address (e.g. student@example.com).',
         isError: true,
       });
       return;
     }
 
     if (!normId) {
-      setStatusMsg({ text: 'Please enter your university Student ID.', isError: true });
+      setStatusMsg({ text: 'Please enter your Student ID.', isError: true });
       return;
     }
     if (!validateStudentID(normId)) {
       setStatusMsg({
-        text: 'Invalid student ID. Format must be CXXXXXX (e.g. C253124).',
-        isError: true,
-      });
-      return;
-    }
-
-    if (!doEmailAndIdMatch(normEmail, normId)) {
-      setStatusMsg({
-        text: 'Student ID does not match the email prefix (e.g. C253124 must match c253124@ugrad.iiuc.ac.bd).',
+        text: 'Please enter a valid Student ID (2–30 characters).',
         isError: true,
       });
       return;
@@ -129,84 +91,25 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
     }
 
     setIsSubmitting(true);
-    const result = await sendMagicLink({
+    const result = await registerPublicStudent({
       email: normEmail,
       studentId: normId,
       displayName: normName,
     });
     setIsSubmitting(false);
 
-    if (result.success) {
-      setLinkSent(true);
-      setStatusMsg({
-        text: `A secure sign-in link has been sent to ${normEmail}. Click the link in your email to sign in without a password.`,
-        isError: false,
-      });
-    } else {
-      setStatusMsg({
-        text: result.error || 'Failed to send magic link. Please verify your connection.',
-        isError: true,
-      });
-    }
-  };
-
-  // 2. Authenticated: Complete Registration Form (Cross-device / sessionStorage missing)
-  const handleCompleteRegistration = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setCompletionMsg(null);
-
-    if (!authSessionUser) {
-      setCompletionMsg({ text: 'No active session found. Please request a new sign-in link.', isError: true });
-      return;
-    }
-
-    const normId = completionStudentId.trim().toUpperCase();
-    const normName = completionDisplayName.trim();
-
-    if (!validateStudentID(normId)) {
-      setCompletionMsg({
-        text: 'Invalid student ID format. Format must be CXXXXXX (e.g. C253124).',
-        isError: true,
-      });
-      return;
-    }
-
-    if (!doEmailAndIdMatch(authSessionUser.email, normId)) {
-      setCompletionMsg({
-        text: `Student ID ${normId} does not match your authenticated email (${authSessionUser.email}). The six digits must match.`,
-        isError: true,
-      });
-      return;
-    }
-
-    if (normName.length < 2 || normName.length > 50) {
-      setCompletionMsg({
-        text: 'Public display name must be between 2 and 50 characters.',
-        isError: true,
-      });
-      return;
-    }
-
-    setIsCompleting(true);
-    const result = await registerAuthenticatedStudent({
-      studentId: normId,
-      displayName: normName,
-    });
-    setIsCompleting(false);
-
     if (result.success && result.profile) {
       onProfileUpdated(result.profile);
       onClose();
     } else {
-      setCompletionMsg({
-        text: result.error || 'Failed to complete registration.',
+      setStatusMsg({
+        text: result.error || 'Failed to register. Please check your connection.',
         isError: true,
-        isMigrationError: result.isMigrationMissing,
       });
     }
   };
 
-  // 3. Edit Display Name
+  // Edit Display Name
   const handleUpdateName = async (e: React.FormEvent) => {
     e.preventDefault();
     setNameError('');
@@ -218,7 +121,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
     }
 
     setIsSavingName(true);
-    const result = await updateDisplayName(trimmed);
+    const result = await updateDisplayName(trimmed, currentUser?.userId);
     setIsSavingName(false);
 
     if (result.success && currentUser) {
@@ -260,8 +163,8 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 <GraduationCap className="w-6 h-6" />
               </div>
               <div>
-                <h2 className="text-lg font-bold text-stone-900">Verified Student Profile</h2>
-                <p className="text-xs text-stone-500">Authenticated via IIUC University Email</p>
+                <h2 className="text-lg font-bold text-stone-900">Student Profile</h2>
+                <p className="text-xs text-stone-500">Registered Contributo Member</p>
               </div>
             </div>
 
@@ -281,7 +184,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                           setNewDisplayName(currentUser.displayName);
                           setIsEditingName(true);
                         }}
-                        className="p-1 text-stone-400 hover:text-orange-700 rounded-md hover:bg-orange-100 transition-colors"
+                        className="p-1 text-stone-400 hover:text-orange-700 rounded-md hover:bg-orange-100 transition-colors cursor-pointer"
                         title="Edit display name"
                       >
                         <Edit2 className="w-3.5 h-3.5" />
@@ -299,7 +202,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                       <button
                         type="submit"
                         disabled={isSavingName}
-                        className="p-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-xs font-semibold"
+                        className="p-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-xs font-semibold cursor-pointer"
                         title="Save name"
                       >
                         <Save className="w-3.5 h-3.5" />
@@ -307,7 +210,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                       <button
                         type="button"
                         onClick={() => setIsEditingName(false)}
-                        className="p-1.5 text-stone-500 hover:bg-stone-200 rounded-lg text-xs"
+                        className="p-1.5 text-stone-500 hover:bg-stone-200 rounded-lg text-xs cursor-pointer"
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>
@@ -318,7 +221,7 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
 
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold border border-emerald-200">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                  Verified
+                  Active
                 </span>
               </div>
 
@@ -328,15 +231,15 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                   <span className="font-mono font-bold text-stone-800">{currentUser.studentId}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-stone-500 block">University Email</span>
+                  <span className="text-[10px] text-stone-500 block">Registered Email</span>
                   <span className="font-mono text-stone-700 truncate block text-[11px]">
-                    {currentUser.universityEmail}
+                    {currentUser.email || currentUser.universityEmail}
                   </span>
                 </div>
               </div>
 
               <p className="text-[11px] text-stone-500 italic pt-1">
-                Student ID and university email are immutable for academic accountability.
+                Your display name is shown on study resources you share with fellow students.
               </p>
             </div>
 
@@ -345,60 +248,75 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-stone-300 hover:border-red-300 hover:bg-red-50 text-stone-700 hover:text-red-700 text-xs font-bold transition-all cursor-pointer"
             >
               <LogOut className="w-4 h-4" />
-              <span>Sign Out</span>
+              <span>Switch Student / Change ID</span>
             </button>
           </div>
-        ) : authSessionUser ? (
+        ) : (
           /* ======================================================== */
-          /* 2. AUTHENTICATED SESSION — REGISTRATION COMPLETION       */
-          /*    (Cross-device / new tab / missing sessionStorage)      */
+          /* 2. SIMPLE PUBLIC REGISTRATION FORM                       */
+          /*    (No passwords, magic links, or Supabase Auth)         */
           /* ======================================================== */
           <div>
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-600 flex items-center justify-center text-white shadow-md shadow-orange-500/20">
-                <UserCheck className="w-6 h-6" />
+                <UserPlus className="w-6 h-6" />
               </div>
               <div>
-                <h2 className="text-lg font-bold text-stone-900">Complete Student Registration</h2>
-                <p className="text-xs text-stone-500">Email verified · Confirm your student details</p>
+                <h2 className="text-lg font-bold text-stone-900">Student Registration</h2>
+                <p className="text-xs text-stone-500">Join Contributo to share & contribute resources</p>
               </div>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 mb-4 text-xs">
-              <div className="flex items-center gap-2 text-emerald-900 font-bold mb-1">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>Inbox Verified via Magic Link</span>
-              </div>
-              <p className="text-emerald-800 font-mono text-[11px] bg-white/80 px-2 py-1 rounded border border-emerald-200/60 truncate">
-                {authSessionUser.email}
-              </p>
-              <p className="text-stone-600 text-[11px] mt-1.5 leading-relaxed">
-                Your email is confirmed. Enter your matching Student ID and Public Display Name to
-                finalize your academic profile.
+            <div className="p-3 rounded-xl bg-orange-50/70 border border-orange-200/80 mb-5 text-xs text-stone-700 leading-relaxed">
+              <p>
+                <strong>Open to students worldwide.</strong> No password, verification link, or OTP required. Simply register your email and Student ID to start sharing learning materials.
               </p>
             </div>
 
-            <form onSubmit={handleCompleteRegistration} className="space-y-4">
+            <form onSubmit={handleRegister} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-stone-700 mb-1">
-                  University Student ID <span className="text-red-500">*</span>
+                  Email Address <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      setStatusMsg(null);
+                    }}
+                    placeholder="student@example.com"
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-stone-300 rounded-xl text-xs text-stone-900 placeholder:text-stone-400 focus:outline-hidden focus:ring-2 focus:ring-orange-500"
+                    required
+                  />
+                  <Mail className="w-4 h-4 text-stone-400 absolute left-3 top-2.5" />
+                </div>
+                <span className="text-[10px] text-stone-500 mt-1 block">
+                  Any valid email address is accepted
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-stone-700 mb-1">
+                  Student ID <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
                   <input
                     type="text"
-                    value={completionStudentId}
+                    value={studentId}
                     onChange={(e) => {
-                      setCompletionStudentId(e.target.value);
-                      setCompletionMsg(null);
+                      setStudentId(e.target.value);
+                      setStatusMsg(null);
                     }}
-                    placeholder="C253124"
+                    placeholder="e.g. C253124 or S102938"
                     className="w-full pl-9 pr-3 py-2 bg-white border border-stone-300 rounded-xl text-xs text-stone-900 uppercase placeholder:text-stone-400 focus:outline-hidden focus:ring-2 focus:ring-orange-500"
                     required
                   />
                   <GraduationCap className="w-4 h-4 text-stone-400 absolute left-3 top-2.5" />
                 </div>
                 <span className="text-[10px] text-stone-500 mt-1 block">
-                  Must match the student number in your confirmed email ({authSessionUser.email.split('@')[0].toUpperCase()})
+                  Your university or college student identification number
                 </span>
               </div>
 
@@ -408,191 +326,46 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={completionDisplayName}
+                  value={displayName}
                   onChange={(e) => {
-                    setCompletionDisplayName(e.target.value);
-                    setCompletionMsg(null);
+                    setDisplayName(e.target.value);
+                    setStatusMsg(null);
                   }}
-                  placeholder="e.g. Md. Elman"
+                  placeholder="e.g. Alex Rahman"
                   className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs text-stone-900 placeholder:text-stone-400 focus:outline-hidden focus:ring-2 focus:ring-orange-500"
                   required
                 />
                 <span className="text-[10px] text-stone-500 mt-1 block">
-                  Displayed as the contributor on resources you share
+                  Displayed on your shared lectures, notes, and study materials
                 </span>
               </div>
 
-              {completionMsg && (
+              {statusMsg && (
                 <div
                   className={`flex items-start gap-2 p-2.5 rounded-lg text-xs border ${
-                    completionMsg.isError
+                    statusMsg.isError
                       ? 'bg-red-50 text-red-700 border-red-200'
                       : 'bg-emerald-50 text-emerald-800 border-emerald-200'
                   }`}
                 >
-                  {completionMsg.isMigrationError ? (
-                    <Database className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                  ) : (
+                  {statusMsg.isError ? (
                     <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
                   )}
-                  <span>{completionMsg.text}</span>
+                  <span>{statusMsg.text}</span>
                 </div>
               )}
 
-              <div className="flex gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={handleSignOut}
-                  className="px-3 py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-                >
-                  Sign Out
-                </button>
-                <button
-                  type="submit"
-                  disabled={isCompleting}
-                  className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white rounded-xl text-xs font-bold shadow-md shadow-orange-600/20 transition-all cursor-pointer disabled:opacity-60"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>{isCompleting ? 'Saving Registration...' : 'Complete Registration'}</span>
-                </button>
-              </div>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white rounded-xl text-xs font-bold shadow-md shadow-orange-600/20 transition-all cursor-pointer disabled:opacity-60"
+              >
+                <UserCheck className="w-4 h-4" />
+                <span>{isSubmitting ? 'Registering...' : 'Complete Registration'}</span>
+              </button>
             </form>
-          </div>
-        ) : (
-          /* ======================================================== */
-          /* 3. GUEST / PASSWORDLESS SIGN IN & REGISTRATION           */
-          /* ======================================================== */
-          <div>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-600 flex items-center justify-center text-white shadow-md shadow-orange-500/20">
-                <UserCheck className="w-6 h-6" />
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-stone-900">Student Sign In & Register</h2>
-                <p className="text-xs text-stone-500">Passwordless · Magic link to IIUC email</p>
-              </div>
-            </div>
-
-            <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200/80 mb-5 text-xs text-stone-700 leading-relaxed">
-              <p>
-                <strong>No password or OTP required.</strong> Enter your official IIUC student email
-                and matching student ID. We will email you a secure one-click sign-in link.
-              </p>
-            </div>
-
-            {linkSent ? (
-              <div className="py-6 text-center space-y-3">
-                <CheckCircle2 className="w-12 h-12 text-emerald-600 mx-auto animate-bounce" />
-                <h3 className="text-base font-bold text-stone-900">Check Your Email Inbox</h3>
-                <p className="text-xs text-stone-600 max-w-sm mx-auto leading-relaxed">
-                  We sent a magic link to <strong>{email.trim().toLowerCase()}</strong>. Click the
-                  link in the email to complete verification and access your student account.
-                </p>
-                <button
-                  onClick={() => {
-                    setLinkSent(false);
-                    setStatusMsg(null);
-                  }}
-                  className="mt-3 text-xs text-orange-700 font-semibold hover:underline cursor-pointer"
-                >
-                  Use a different email or resend
-                </button>
-              </div>
-            ) : (
-              <form onSubmit={handleSendMagicLink} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-stone-700 mb-1">
-                    IIUC University Email <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => {
-                        setEmail(e.target.value);
-                        setStatusMsg(null);
-                      }}
-                      placeholder="c253124@ugrad.iiuc.ac.bd"
-                      className="w-full pl-9 pr-3 py-2 bg-white border border-stone-300 rounded-xl text-xs text-stone-900 placeholder:text-stone-400 focus:outline-hidden focus:ring-2 focus:ring-orange-500"
-                      required
-                    />
-                    <Mail className="w-4 h-4 text-stone-400 absolute left-3 top-2.5" />
-                  </div>
-                  <span className="text-[10px] text-stone-500 mt-1 block">
-                    Format: cXXXXXX@ugrad.iiuc.ac.bd
-                  </span>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-stone-700 mb-1">
-                    Student ID <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={studentId}
-                      onChange={(e) => {
-                        setStudentId(e.target.value);
-                        setStatusMsg(null);
-                      }}
-                      placeholder="C253124"
-                      className="w-full pl-9 pr-3 py-2 bg-white border border-stone-300 rounded-xl text-xs text-stone-900 uppercase placeholder:text-stone-400 focus:outline-hidden focus:ring-2 focus:ring-orange-500"
-                      required
-                    />
-                    <GraduationCap className="w-4 h-4 text-stone-400 absolute left-3 top-2.5" />
-                  </div>
-                  <span className="text-[10px] text-stone-500 mt-1 block">
-                    Must match the student number in your email (e.g. C253124)
-                  </span>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-stone-700 mb-1">
-                    Public Display Name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={displayName}
-                    onChange={(e) => {
-                      setDisplayName(e.target.value);
-                      setStatusMsg(null);
-                    }}
-                    placeholder="e.g. Md. Elman"
-                    className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs text-stone-900 placeholder:text-stone-400 focus:outline-hidden focus:ring-2 focus:ring-orange-500"
-                    required
-                  />
-                  <span className="text-[10px] text-stone-500 mt-1 block">
-                    Displayed on your shared lectures and study materials
-                  </span>
-                </div>
-
-                {statusMsg && (
-                  <div
-                    className={`flex items-start gap-2 p-2.5 rounded-lg text-xs border ${
-                      statusMsg.isError
-                        ? 'bg-red-50 text-red-700 border-red-200'
-                        : 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                    }`}
-                  >
-                    {statusMsg.isError ? (
-                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                    ) : (
-                      <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
-                    )}
-                    <span>{statusMsg.text}</span>
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white rounded-xl text-xs font-bold shadow-md shadow-orange-600/20 transition-all cursor-pointer disabled:opacity-60"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>{isSubmitting ? 'Sending Magic Link...' : 'Send Magic Link'}</span>
-                </button>
-              </form>
-            )}
           </div>
         )}
       </div>

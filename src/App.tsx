@@ -10,24 +10,21 @@ import { SyllabusInfoView } from './components/SyllabusInfoView';
 import { COURSES } from './data/courses';
 import { SYLLABUS_SEGMENTS } from './data/syllabusSegments';
 import {
-  completePendingRegistration,
-  fetchRegisteredStudent
+  fetchRegisteredStudent,
+  getLocalStudent,
+  saveLocalStudent
 } from './lib/auth';
 import {
   fetchAllSegments,
   fetchCourseLiveCounts,
   fetchSegmentLiveCounts,
-  getSupabase,
   isSupabaseConfigured
 } from './lib/supabase';
 import { Course, RegisteredStudent, Segment } from './types';
 
 export default function App() {
-  // Authenticated Student Profile (from public.registered_students)
-  const [currentUser, setCurrentUser] = useState<RegisteredStudent | null>(null);
-  // Active Supabase Auth Session (even if public.registered_students record is still pending)
-  const [authSessionUser, setAuthSessionUser] = useState<{ id: string; email: string } | null>(null);
-  const [initialStudentId, setInitialStudentId] = useState('');
+  // Registered Student Profile from localStorage or Supabase
+  const [currentUser, setCurrentUser] = useState<RegisteredStudent | null>(() => getLocalStudent());
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   // Supabase Setup Modal
@@ -66,48 +63,6 @@ export default function App() {
     });
   };
 
-  // Synchronize authenticated user state with Supabase Auth
-  const syncAuthState = async () => {
-    const supabase = getSupabase();
-    if (!supabase) {
-      setCurrentUser(null);
-      setAuthSessionUser(null);
-      return;
-    }
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) {
-        setCurrentUser(null);
-        setAuthSessionUser(null);
-        return;
-      }
-
-      const sessionEmail = session.user.email || '';
-      setAuthSessionUser({ id: session.user.id, email: sessionEmail });
-
-      // Check if user is already registered in public.registered_students
-      let profile = await fetchRegisteredStudent(session.user.id);
-      if (!profile) {
-        // Complete pending registration or detect cross-device manual completion
-        const pendingRes = await completePendingRegistration(session.user.id, sessionEmail);
-        if (pendingRes.success && pendingRes.profile) {
-          profile = pendingRes.profile;
-        } else if (pendingRes.requiresManualCompletion) {
-          if (pendingRes.suggestedStudentId) {
-            setInitialStudentId(pendingRes.suggestedStudentId);
-          }
-          // Open profile modal to show the authenticated registration-completion form
-          setIsProfileModalOpen(true);
-        }
-      }
-      setCurrentUser(profile);
-    } catch (err) {
-      console.error('Error synchronizing auth state:', err);
-      setCurrentUser(null);
-    }
-  };
-
   // Sync data and counts
   const loadDatabaseData = async () => {
     setIsSupabaseLive(isSupabaseConfigured());
@@ -127,23 +82,15 @@ export default function App() {
 
   useEffect(() => {
     loadDatabaseData();
-    syncAuthState();
 
-    const supabase = getSupabase();
-    if (supabase) {
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event) => {
-        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
-          await syncAuthState();
-        } else if (event === 'SIGNED_OUT') {
-          setCurrentUser(null);
-          setAuthSessionUser(null);
-          setInitialStudentId('');
+    // If local student exists and Supabase is configured, verify/refresh in background
+    if (currentUser?.userId) {
+      fetchRegisteredStudent(currentUser.userId).then((profile) => {
+        if (profile) {
+          setCurrentUser(profile);
+          saveLocalStudent(profile);
         }
       });
-
-      return () => {
-        subscription.unsubscribe();
-      };
     }
   }, [isSupabaseLive]);
 
@@ -214,7 +161,6 @@ export default function App() {
       {/* Main Contributo Header */}
       <Navbar
         currentUser={currentUser}
-        authSessionUser={authSessionUser}
         isSupabaseLive={isSupabaseLive}
         onOpenSupabaseSetup={() => setIsSupabaseModalOpen(true)}
         onOpenProfile={() => setIsProfileModalOpen(true)}
@@ -364,7 +310,6 @@ export default function App() {
         onClose={() => setIsSupabaseModalOpen(false)}
         onCredentialsUpdated={() => {
           loadDatabaseData();
-          syncAuthState();
         }}
       />
 
@@ -372,14 +317,8 @@ export default function App() {
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
         currentUser={currentUser}
-        authSessionUser={authSessionUser}
-        initialStudentId={initialStudentId}
         onProfileUpdated={(s) => {
           setCurrentUser(s);
-          if (!s) {
-            setAuthSessionUser(null);
-            setInitialStudentId('');
-          }
         }}
       />
     </div>

@@ -2,9 +2,8 @@ import React from 'react';
 import {
   Bookmark,
   GraduationCap,
-  LogIn,
   ShieldCheck,
-  UserCheck
+  UserPlus
 } from 'lucide-react';
 import { RegisteredStudent } from '../types';
 
@@ -21,7 +20,6 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
-  authSessionUser,
   isSupabaseLive,
   onOpenSupabaseSetup,
   onOpenProfile,
@@ -121,7 +119,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="sm:hidden font-mono text-[11px]">DB</span>
             </button>
 
-            {/* Student Auth / Profile Button */}
+            {/* Student Profile / Register Button */}
             {currentUser ? (
               <button
                 onClick={onOpenProfile}
@@ -146,21 +144,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </span>
                 </div>
               </button>
-            ) : authSessionUser ? (
-              <button
-                onClick={onOpenProfile}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-400 bg-amber-50 hover:bg-amber-100 text-amber-950 transition-all cursor-pointer shadow-2xs text-xs font-bold"
-              >
-                <UserCheck className="w-3.5 h-3.5 text-amber-600" />
-                <span>Complete Registration</span>
-              </button>
             ) : (
               <button
                 onClick={onOpenProfile}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-orange-300 bg-orange-50/80 hover:bg-orange-100 text-orange-950 transition-all cursor-pointer shadow-2xs text-xs font-bold"
               >
-                <LogIn className="w-3.5 h-3.5 text-orange-600" />
-                <span>Sign In / Register</span>
+                <UserPlus className="w-3.5 h-3.5 text-orange-600" />
+                <span>Register Student ID</span>
               </button>
             )}
           </div>

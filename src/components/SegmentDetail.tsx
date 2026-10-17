@@ -95,7 +95,7 @@ export const SegmentDetail: React.FC<SegmentDetailProps> = ({
       return;
     }
     if (confirm('Are you sure you want to delete this shared YouTube resource?')) {
-      const res = await deleteYouTubeResource(id);
+      const res = await deleteYouTubeResource(id, currentUser.userId);
       if (!res.success) {
         alert(res.error || 'Failed to delete resource.');
       } else {
@@ -110,7 +110,7 @@ export const SegmentDetail: React.FC<SegmentDetailProps> = ({
       return;
     }
     if (confirm(`Are you sure you want to delete "${resource.title}"?`)) {
-      const res = await deleteFileResource(resource);
+      const res = await deleteFileResource(resource, currentUser.userId);
       if (!res.success) {
         alert(res.error || 'Failed to delete file.');
       } else {

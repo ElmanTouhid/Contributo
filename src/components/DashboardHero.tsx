@@ -45,7 +45,7 @@ export const DashboardHero: React.FC<DashboardHeroProps> = ({
         <p className="text-xs sm:text-sm text-stone-500 mb-8 leading-relaxed">
           {currentUser
             ? 'Contribute study materials, find helpful lectures, and collaborate with your peers.'
-            : 'Browse lectures and materials freely, or sign in with your IIUC email to contribute.'}
+            : 'Browse lectures and materials freely, or register with your Student ID to share resources.'}
         </p>
 
         {/* Search Bar */}
