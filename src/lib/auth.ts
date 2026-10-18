@@ -233,7 +233,6 @@ export async function registerPublicStudent(params: {
       p_email: normEmail,
       p_student_id: normId,
       p_display_name: normName,
-      p_user_id: candidateUserId,
     });
 
     if (rpcError) {
@@ -271,44 +270,10 @@ export async function registerPublicStudent(params: {
       return { success: true, profile };
     }
 
-    // 2. Direct table fallback if RPC is not yet created in Supabase
-    const newRow = {
-      user_id: candidateUserId,
-      email: normEmail,
-      student_id: normId,
-      display_name: normName,
-      created_at: new Date().toISOString(),
+    return {
+      success: false,
+      error: 'Registration was submitted but no record was returned. Please try again.',
     };
-
-    const { error: insertError } = await supabase
-      .from('registered_students')
-      .insert([newRow]);
-
-    if (insertError) {
-      if (
-        insertError.code === '23505' ||
-        insertError.message?.toLowerCase().includes('unique') ||
-        insertError.message?.toLowerCase().includes('duplicate')
-      ) {
-        return {
-          success: false,
-          error: 'This email address or student ID is already registered.',
-        };
-      }
-      return { success: false, error: insertError.message };
-    }
-
-    const createdProfile: RegisteredStudent = {
-      userId: candidateUserId,
-      email: normEmail,
-      universityEmail: normEmail,
-      studentId: normId,
-      displayName: normName,
-      createdAt: newRow.created_at,
-    };
-
-    saveLocalStudent(createdProfile);
-    return { success: true, profile: createdProfile };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Registration failed.';
     console.error('Registration exception:', err);
