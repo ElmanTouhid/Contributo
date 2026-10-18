@@ -19,7 +19,7 @@ interface ShareFileModalProps {
   onResourceAdded: () => void;
 }
 
-const ALLOWED_EXTENSIONS = ['pdf', 'ppt', 'pptx', 'doc', 'docx', 'png', 'jpg', 'jpeg'];
+const ALLOWED_EXTENSIONS = ['pdf'];
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
 
 export const ShareFileModal: React.FC<ShareFileModalProps> = ({
@@ -46,7 +46,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
 
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      setErrorMsg(`Invalid file type (.${ext}). Allowed formats: PDF, PPT/PPTX, DOC/DOCX, PNG, JPG/JPEG.`);
+      setErrorMsg(`Invalid file type (.${ext}). Only PDF documents (.pdf) are allowed.`);
       return;
     }
 
@@ -170,7 +170,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
                 ref={fileInputRef}
                 type="file"
                 className="hidden"
-                accept=".pdf,.ppt,.pptx,.doc,.docx,.png,.jpg,.jpeg"
+                accept=".pdf,application/pdf"
                 onChange={handleFileChange}
               />
 
@@ -189,7 +189,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
                     Click to browse or drag and drop your file here
                   </p>
                   <p className="text-[11px] text-stone-500">
-                    PDF, PPT/PPTX, DOC/DOCX, PNG, JPG/JPEG (Max 15 MB)
+                    PDF documents only (Max 15 MB)
                   </p>
                 </div>
               )}
