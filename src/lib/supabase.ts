@@ -81,13 +81,61 @@ export function getSupabase(): SupabaseClient | null {
   try {
     cachedClient = createClient(url, anonKey, {
       auth: {
-        persistSession: false,
-        autoRefreshToken: false,
+        persistSession: true,
+        autoRefreshToken: true,
       },
     });
     return cachedClient;
   } catch (err) {
     console.error('Failed to initialize Supabase client:', err);
+    return null;
+  }
+}
+
+/**
+ * Initializes Supabase Auth session on app load.
+ * If there is no active session, calls supabase.auth.signInAnonymously().
+ */
+export async function initAuthSession(): Promise<{ userId: string | null; error?: string }> {
+  const supabase = getSupabase();
+  if (!supabase) return { userId: null };
+
+  try {
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) {
+      console.warn('Supabase getSession notice:', sessionError.message);
+    }
+    if (session?.user?.id) {
+      return { userId: session.user.id };
+    }
+
+    const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
+    if (anonError) {
+      console.warn('Supabase signInAnonymously notice:', anonError.message);
+      return { userId: null, error: anonError.message };
+    }
+    return { userId: anonData?.user?.id || null };
+  } catch (err: unknown) {
+    console.warn('initAuthSession error:', err);
+    return { userId: null, error: (err as Error).message };
+  }
+}
+
+/**
+ * Retrieves the current session user ID (or creates an anonymous session if absent).
+ */
+export async function getAuthUserId(): Promise<string | null> {
+  const supabase = getSupabase();
+  if (!supabase) return null;
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user?.id) {
+      return session.user.id;
+    }
+    const res = await initAuthSession();
+    return res.userId;
+  } catch {
     return null;
   }
 }
@@ -268,9 +316,18 @@ export async function checkYouTubeDuplicateInSegment(segmentId: string, youtubeI
   }
 }
 
-export async function addYouTubeResource(
-  resource: Omit<YouTubeResource, 'id' | 'created_at'>
-): Promise<{ success: boolean; error?: string }> {
+export async function addYouTubeResource(resource: {
+  course_id: string;
+  segment_id: string;
+  title: string;
+  topic: string;
+  description?: string;
+  resource_type: 'video' | 'playlist';
+  youtube_id: string;
+  youtube_url?: string;
+  contributor_id?: string;
+  contributor_name?: string;
+}): Promise<{ success: boolean; error?: string }> {
   const supabase = getSupabase();
   if (!supabase) {
     return {
@@ -279,8 +336,51 @@ export async function addYouTubeResource(
     };
   }
 
+  // Validate title (3-150 chars)
+  const title = (resource.title || '').trim();
+  if (title.length < 3 || title.length > 150) {
+    return {
+      success: false,
+      error: 'Title must be between 3 and 150 characters.',
+    };
+  }
+
+  // Validate topic (2-100 chars)
+  const topic = (resource.topic || '').trim();
+  if (topic.length < 2 || topic.length > 100) {
+    return {
+      success: false,
+      error: 'Topic must be between 2 and 100 characters.',
+    };
+  }
+
+  // Validate description (max 500 chars)
+  const description = (resource.description || '').trim();
+  if (description.length > 500) {
+    return {
+      success: false,
+      error: 'Description cannot exceed 500 characters.',
+    };
+  }
+
+  // Validate resource_type
+  if (resource.resource_type !== 'video' && resource.resource_type !== 'playlist') {
+    return {
+      success: false,
+      error: 'Resource type must be "video" or "playlist".',
+    };
+  }
+
+  const youtubeId = (resource.youtube_id || '').trim();
+  if (!youtubeId) {
+    return {
+      success: false,
+      error: 'A valid YouTube ID is required.',
+    };
+  }
+
   // Duplicate check
-  const isDuplicate = await checkYouTubeDuplicateInSegment(resource.segment_id, resource.youtube_id);
+  const isDuplicate = await checkYouTubeDuplicateInSegment(resource.segment_id, youtubeId);
   if (isDuplicate) {
     return {
       success: false,
@@ -288,18 +388,27 @@ export async function addYouTubeResource(
     };
   }
 
-  const generatedId = typeof crypto !== 'undefined' && crypto.randomUUID
-    ? crypto.randomUUID()
-    : `yt-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  // Use session.user.id as contributor_id
+  const uid = resource.contributor_id || (await getAuthUserId()) || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'anonymous-student');
+  const contributorName = (resource.contributor_name || '').trim() || 'Anonymous Student';
 
+  // Construct youtube_url = 'https://www.youtube.com/watch?v=' + id for video or 'https://www.youtube.com/playlist?list=' + id for playlist
+  const youtubeUrl = resource.resource_type === 'playlist'
+    ? `https://www.youtube.com/playlist?list=${youtubeId}`
+    : `https://www.youtube.com/watch?v=${youtubeId}`;
+
+  // Insert directly into youtube_resources matching live schema
   const row = {
-    ...resource,
-    url: resource.youtube_url, // Backwards compatibility if table has 'url' column
-    id: generatedId,
-    status: 'active',
-    contributor_id: resource.contributor_id || 'student',
-    contributor_name: resource.contributor_name || 'Student',
-    created_at: new Date().toISOString(),
+    course_id: resource.course_id,
+    segment_id: resource.segment_id,
+    title,
+    topic,
+    description,
+    resource_type: resource.resource_type,
+    youtube_id: youtubeId,
+    youtube_url: youtubeUrl,
+    contributor_id: uid,
+    contributor_name: contributorName,
   };
 
   const { error } = await supabase.from('youtube_resources').insert([row]);
@@ -333,14 +442,16 @@ export async function deleteYouTubeResource(id: string, contributorId?: string):
   return { success: true };
 }
 
+export const ALLOWED_FILE_EXTENSIONS = ['pdf', 'ppt', 'pptx', 'doc', 'docx', 'png', 'jpg', 'jpeg'] as const;
+
 export async function uploadAndAddFileResource(params: {
   file: File;
   courseId: string;
   segmentId: string;
   title: string;
-  description: string;
+  description?: string;
   contributorId?: string;
-  contributorName: string;
+  contributorName?: string;
 }): Promise<{ success: boolean; error?: string }> {
   const supabase = getSupabase();
   if (!supabase) {
@@ -352,35 +463,49 @@ export async function uploadAndAddFileResource(params: {
 
   const { file, courseId, segmentId, title, description, contributorId, contributorName } = params;
 
-  // File size validation (15 MB)
-  const maxBytes = 15 * 1024 * 1024;
-  if (file.size > maxBytes) {
-    return { success: false, error: 'File size exceeds maximum allowed limit of 15 MB.' };
-  }
-
-  // File type validation (PDF only)
-  const ext = file.name.split('.').pop()?.toLowerCase() || '';
-  if (ext !== 'pdf') {
+  // File size validation: 1 to 15728640 (1 to 15 MB)
+  if (file.size < 1 || file.size > 15728640) {
     return {
       success: false,
-      error: `Invalid file type .${ext}. Only PDF documents (.pdf) are allowed.`,
+      error: 'File size must be between 1 byte and 15 MB (15,728,640 bytes).',
     };
   }
 
-  const generatedId = typeof crypto !== 'undefined' && crypto.randomUUID
-    ? crypto.randomUUID()
-    : `file-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+  // File type validation: one of pdf, ppt, pptx, doc, docx, png, jpg, jpeg
+  const ext = file.name.split('.').pop()?.toLowerCase() || '';
+  if (!ALLOWED_FILE_EXTENSIONS.includes(ext as (typeof ALLOWED_FILE_EXTENSIONS)[number])) {
+    return {
+      success: false,
+      error: `Invalid file type .${ext}. Allowed file types: ${ALLOWED_FILE_EXTENSIONS.join(', ')}.`,
+    };
+  }
 
-  const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const ownerFolder = contributorId || 'student';
-  const filePath = `${ownerFolder}/${courseId}/${segmentId}/${generatedId}-${cleanFileName}`;
+  const trimmedTitle = (title || '').trim();
+  if (!trimmedTitle) {
+    return { success: false, error: 'File title cannot be empty.' };
+  }
 
-  // 1. Upload to Supabase Storage bucket 'course-files'
+  // Use session.user.id as contributor_id
+  const uid = contributorId || (await getAuthUserId()) || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'anonymous-student');
+  const finalContributorName = (contributorName || '').trim() || 'Anonymous Student';
+
+  // Construct safeFileName using only A-Za-z0-9._- (max 120 chars) and ends with '.' + file_type
+  const lastDot = file.name.lastIndexOf('.');
+  const rawBase = lastDot > 0 ? file.name.substring(0, lastDot) : file.name;
+  const cleanBase = rawBase.replace(/[^a-zA-Z0-9._-]/g, '_') || 'file';
+  const maxBaseLen = 120 - 1 - ext.length;
+  const safeBase = cleanBase.slice(0, Math.max(1, maxBaseLen));
+  const safeFileName = `${safeBase}.${ext}`;
+
+  // file_path = `${uid}/${course_id}/${segment_id}/${safeFileName}`
+  const filePath = `${uid}/${courseId}/${segmentId}/${safeFileName}`;
+
+  // 1. Upload the file to bucket 'course-files' at that same path
   const { error: uploadError } = await supabase.storage
     .from('course-files')
     .upload(filePath, file, {
       cacheControl: '3600',
-      upsert: false,
+      upsert: true,
     });
 
   if (uploadError) {
@@ -394,22 +519,19 @@ export async function uploadAndAddFileResource(params: {
     return { success: false, error: uploadError.message };
   }
 
-  // 2. Insert metadata row into 'file_resources' table
+  // 2. Insert directly into file_resources matching live schema:
+  // course_id, segment_id, title, description, file_name, file_type, file_size, contributor_id, contributor_name, file_path
   const row = {
-    id: generatedId,
     course_id: courseId,
     segment_id: segmentId,
-    file_path: filePath,
-    file_url: filePath, // Backwards compatibility if table has 'file_url' column
+    title: trimmedTitle,
+    description: description ? description.trim() : '',
     file_name: file.name,
     file_type: ext,
     file_size: file.size,
-    title: title.trim(),
-    description: description.trim(),
-    status: 'active',
-    contributor_id: ownerFolder,
-    contributor_name: contributorName || 'Student',
-    created_at: new Date().toISOString(),
+    contributor_id: uid,
+    contributor_name: finalContributorName,
+    file_path: filePath,
   };
 
   const { error: dbError } = await supabase.from('file_resources').insert([row]);
@@ -464,13 +586,27 @@ export async function deleteFileResource(resource: FileResource, currentUserId?:
   return { success: true };
 }
 
+export const REPORT_REASONS = [
+  'Spam',
+  'Wrong course/segment',
+  'Inappropriate',
+  'Broken link or file',
+  'Other',
+] as const;
+
 export async function submitResourceReport(report: Report): Promise<{ success: boolean; error?: string; alreadyReported?: boolean }> {
   const supabase = getSupabase();
   if (!supabase) {
     return { success: false, error: 'Supabase is not configured.' };
   }
 
-  const reporterId = report.reporter_id || 'anonymous';
+  // Validate reason: one of Spam, Wrong course/segment, Inappropriate, Broken link or file, Other
+  if (!REPORT_REASONS.includes(report.reason as (typeof REPORT_REASONS)[number])) {
+    return { success: false, error: 'Invalid report reason.' };
+  }
+
+  // Use session.user.id as reporter_id
+  const reporterId = report.reporter_id || (await getAuthUserId()) || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'anonymous');
   const sessionKey = `contributo_rep_${report.resource_id}_${reporterId}`;
 
   // Session-based check prevents duplicate reports without needing SELECT access on the reports table
@@ -484,22 +620,17 @@ export async function submitResourceReport(report: Report): Promise<{ success: b
     }
   }
 
-  const generatedId = typeof crypto !== 'undefined' && crypto.randomUUID
-    ? crypto.randomUUID()
-    : `rep-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-
-  // Populate both resource_kind and legacy resource_type for schema compatibility
-  const row = {
-    id: generatedId,
+  // Insert directly matching live schema:
+  // resource_kind ('youtube' or 'file'), youtube_resource_id OR file_resource_id (exactly one), reporter_id, reason
+  const insertRow: Record<string, unknown> = {
     resource_kind: report.resource_kind,
-    resource_type: report.resource_kind,
-    resource_id: report.resource_id,
+    youtube_resource_id: report.resource_kind === 'youtube' ? report.resource_id : null,
+    file_resource_id: report.resource_kind === 'file' ? report.resource_id : null,
     reporter_id: reporterId,
     reason: report.reason,
-    created_at: new Date().toISOString(),
   };
 
-  const { error } = await supabase.from('reports').insert([row]);
+  const { error } = await supabase.from('reports').insert([insertRow]);
   if (error) {
     return { success: false, error: error.message };
   }
@@ -671,12 +802,8 @@ export const SUPABASE_SETUP_SQL = `-- ==========================================
 -- 1. public.resource_helpful_votes does NOT exist yet. Created in its final shape:
 --    (resource_kind text, resource_id uuid, voter_hash text, created_at timestamptz,
 --     PRIMARY KEY (resource_kind, resource_id, voter_hash)).
--- 2. public.registered_students.user_id is currently NOT NULL. Public registration
---    allows visitors without an auth account, so user_id is made nullable
---    (ALTER COLUMN user_id DROP NOT NULL). Migration halts cleanly if user_id
---    is part of the PRIMARY KEY.
--- 3. Pre-flight invariant checks inspect existing tables (registered_students,
---    youtube_resources, file_resources, reports) and data types before any mutation.
+-- 2. Pre-flight invariant checks inspect existing tables (youtube_resources,
+--    file_resources, reports) and data types before any mutation.
 --
 -- ATOMIC SAFETY & PRIVILEGES:
 -- - Entire migration runs in one BEGIN ... COMMIT transaction.
@@ -685,7 +812,7 @@ export const SUPABASE_SETUP_SQL = `-- ==========================================
 -- - Explicitly granted:
 --     * youtube_resources, file_resources: SELECT + INSERT (insert forces helpful_count = 0).
 --     * reports: INSERT only.
---     * registered_students, resource_helpful_votes: No direct access (RLS enabled, 0 policies).
+--     * resource_helpful_votes: No direct access (RLS enabled, 0 policies).
 -- - SECURITY DEFINER functions set search_path = public, pg_temp.
 -- ============================================================================
 
@@ -706,116 +833,12 @@ BEGIN;
 
 DO $$
 DECLARE
-  v_user_id_in_pk boolean := false;
   v_col_type text;
   v_dup_count integer := 0;
   v_dup_sample text := '';
 BEGIN
   -- --------------------------------------------------------------------------
-  -- 1. Validate public.registered_students
-  -- --------------------------------------------------------------------------
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = 'registered_students'
-  ) THEN
-    RAISE EXCEPTION 'PRE-FLIGHT FAILED: Required table public.registered_students does not exist.';
-  END IF;
-
-  -- Required columns
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'registered_students' AND column_name = 'student_id') THEN
-    RAISE EXCEPTION 'PRE-FLIGHT FAILED: Table public.registered_students is missing column "student_id".';
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'registered_students' AND column_name = 'email') THEN
-    RAISE EXCEPTION 'PRE-FLIGHT FAILED: Table public.registered_students is missing column "email".';
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'registered_students' AND column_name = 'display_name') THEN
-    RAISE EXCEPTION 'PRE-FLIGHT FAILED: Table public.registered_students is missing column "display_name".';
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'registered_students' AND column_name = 'user_id') THEN
-    RAISE EXCEPTION 'PRE-FLIGHT FAILED: Table public.registered_students is missing column "user_id".';
-  END IF;
-
-  -- Check if user_id is part of the Primary Key
-  -- PostgreSQL disallows NULL in primary key columns.
-  SELECT EXISTS (
-    SELECT 1
-    FROM pg_catalog.pg_constraint con
-    JOIN pg_catalog.pg_class c ON c.oid = con.conrelid
-    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-    JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(con.conkey)
-    WHERE n.nspname = 'public'
-      AND c.relname = 'registered_students'
-      AND con.contype = 'p'
-      AND a.attname = 'user_id'
-  ) INTO v_user_id_in_pk;
-
-  IF v_user_id_in_pk THEN
-    RAISE EXCEPTION 'PRE-FLIGHT FAILED: Column "user_id" in public.registered_students is part of the PRIMARY KEY and cannot be made nullable. Please reconfigure the table primary key (e.g. use student_id or an independent surrogate id) before making user_id nullable.';
-  END IF;
-
-  -- Check column data types for registered_students
-  SELECT data_type INTO v_col_type
-  FROM information_schema.columns
-  WHERE table_schema = 'public' AND table_name = 'registered_students' AND column_name = 'email';
-  IF v_col_type NOT IN ('text', 'character varying', 'character') THEN
-    RAISE EXCEPTION 'PRE-FLIGHT FAILED: Column public.registered_students.email must be string/text type, found "%".', v_col_type;
-  END IF;
-
-  SELECT data_type INTO v_col_type
-  FROM information_schema.columns
-  WHERE table_schema = 'public' AND table_name = 'registered_students' AND column_name = 'student_id';
-  IF v_col_type NOT IN ('text', 'character varying', 'character') THEN
-    RAISE EXCEPTION 'PRE-FLIGHT FAILED: Column public.registered_students.student_id must be string/text type, found "%".', v_col_type;
-  END IF;
-
-  SELECT data_type INTO v_col_type
-  FROM information_schema.columns
-  WHERE table_schema = 'public' AND table_name = 'registered_students' AND column_name = 'display_name';
-  IF v_col_type NOT IN ('text', 'character varying', 'character') THEN
-    RAISE EXCEPTION 'PRE-FLIGHT FAILED: Column public.registered_students.display_name must be string/text type, found "%".', v_col_type;
-  END IF;
-
-  SELECT data_type INTO v_col_type
-  FROM information_schema.columns
-  WHERE table_schema = 'public' AND table_name = 'registered_students' AND column_name = 'user_id';
-  IF v_col_type NOT IN ('uuid', 'text', 'character varying') THEN
-    RAISE EXCEPTION 'PRE-FLIGHT FAILED: Column public.registered_students.user_id must be uuid or string, found "%".', v_col_type;
-  END IF;
-
-  -- Check for existing duplicate emails before applying unique index
-  SELECT count(*), string_agg(lower_email, ', ')
-  INTO v_dup_count, v_dup_sample
-  FROM (
-    SELECT lower(trim(email)) AS lower_email
-    FROM public.registered_students
-    WHERE email IS NOT NULL AND trim(email) != ''
-    GROUP BY lower(trim(email))
-    HAVING count(*) > 1
-    LIMIT 5
-  ) t;
-
-  IF v_dup_count > 0 THEN
-    RAISE EXCEPTION 'PRE-FLIGHT FAILED: Found % duplicate email address group(s) in public.registered_students (samples: %). Resolve duplicate registrations before applying unique indexes.', v_dup_count, v_dup_sample;
-  END IF;
-
-  -- Check for existing duplicate student IDs before applying unique index
-  SELECT count(*), string_agg(upper_id, ', ')
-  INTO v_dup_count, v_dup_sample
-  FROM (
-    SELECT upper(trim(student_id)) AS upper_id
-    FROM public.registered_students
-    WHERE student_id IS NOT NULL AND trim(student_id) != ''
-    GROUP BY upper(trim(student_id))
-    HAVING count(*) > 1
-    LIMIT 5
-  ) t;
-
-  IF v_dup_count > 0 THEN
-    RAISE EXCEPTION 'PRE-FLIGHT FAILED: Found % duplicate student_id group(s) in public.registered_students (samples: %). Resolve duplicate registrations before applying unique indexes.', v_dup_count, v_dup_sample;
-  END IF;
-
-  -- --------------------------------------------------------------------------
-  -- 2. Validate public.youtube_resources
+  -- 1. Validate public.youtube_resources
   -- --------------------------------------------------------------------------
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.tables
@@ -1000,12 +1023,10 @@ BEGIN
       IF b.id IS NOT NULL THEN
         IF NOT (
           b.public = true AND
-          coalesce(b.file_size_limit, 0) BETWEEN 1048576 AND 15728640 AND
-          b.allowed_mime_types IS NOT NULL AND
-          (b.allowed_mime_types = ARRAY['application/pdf'] OR (cardinality(b.allowed_mime_types) = 1 AND 'application/pdf' = ANY(b.allowed_mime_types)))
+          coalesce(b.file_size_limit, 0) BETWEEN 1048576 AND 15728640
         ) THEN
-          RAISE EXCEPTION 'PRE-FLIGHT FAILED: Storage bucket "course-files" exists with incompatible settings (public=%, file_size_limit=%, allowed_mime_types=%). Required: public=true, file_size_limit between 1048576 and 15728640 (1MB-15MB), and allowed_mime_types containing only application/pdf.',
-            b.public, b.file_size_limit, b.allowed_mime_types;
+          RAISE EXCEPTION 'PRE-FLIGHT FAILED: Storage bucket "course-files" exists with incompatible settings (public=%, file_size_limit=%). Required: public=true, file_size_limit between 1048576 and 15728640 (1MB-15MB).',
+            b.public, b.file_size_limit;
         END IF;
       END IF;
     END;
@@ -1104,44 +1125,7 @@ END $$;
 -- All operations preserve existing data without loss or destructive dropping.
 -- ============================================================================
 
--- 1. Reconcile registered_students: Make user_id nullable for public registration
-ALTER TABLE public.registered_students ALTER COLUMN user_id DROP NOT NULL;
-ALTER TABLE public.registered_students ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now();
-
--- Ensure created_at is timestamp with time zone
-DO $$
-DECLARE
-  v_col_type text;
-BEGIN
-  SELECT data_type INTO v_col_type
-  FROM information_schema.columns
-  WHERE table_schema = 'public' AND table_name = 'registered_students' AND column_name = 'created_at';
-
-  IF v_col_type = 'timestamp without time zone' THEN
-    ALTER TABLE public.registered_students ALTER COLUMN created_at TYPE timestamp with time zone USING created_at AT TIME ZONE 'UTC';
-  END IF;
-
-  UPDATE public.registered_students SET created_at = now() WHERE created_at IS NULL;
-  ALTER TABLE public.registered_students ALTER COLUMN created_at SET DEFAULT now();
-
-  -- If surrogate id exists without default, set default gen_random_uuid()
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'registered_students'
-      AND column_name = 'id' AND column_default IS NULL
-  ) THEN
-    ALTER TABLE public.registered_students ALTER COLUMN id SET DEFAULT gen_random_uuid();
-  END IF;
-END $$;
-
--- Ensure unique indexes exist on registered_students
-CREATE UNIQUE INDEX IF NOT EXISTS registered_students_email_lower_uidx
-  ON public.registered_students (lower(trim(email)));
-
-CREATE UNIQUE INDEX IF NOT EXISTS registered_students_student_id_upper_uidx
-  ON public.registered_students (upper(trim(student_id)));
-
--- 2. Reconcile youtube_resources
+-- 1. Reconcile youtube_resources
 ALTER TABLE public.youtube_resources ADD COLUMN IF NOT EXISTS youtube_url text;
 ALTER TABLE public.youtube_resources ADD COLUMN IF NOT EXISTS url text;
 ALTER TABLE public.youtube_resources ADD COLUMN IF NOT EXISTS youtube_id text;
@@ -1465,19 +1449,18 @@ CREATE INDEX IF NOT EXISTS idx_reports_resource_created
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 
 -- 1. Revoke ALL table-level privileges from anon, authenticated, public
-REVOKE ALL ON TABLE public.registered_students FROM anon, authenticated, public;
 REVOKE ALL ON TABLE public.youtube_resources FROM anon, authenticated, public;
 REVOKE ALL ON TABLE public.file_resources FROM anon, authenticated, public;
 REVOKE ALL ON TABLE public.reports FROM anon, authenticated, public;
 REVOKE ALL ON TABLE public.resource_helpful_votes FROM anon, authenticated, public;
 
--- Explicitly revoke any leftover column-level privileges across all five tables
+-- Explicitly revoke any leftover column-level privileges across tables
 DO $$
 DECLARE
   t text;
   col text;
 BEGIN
-  FOR t IN SELECT unnest(ARRAY['registered_students', 'youtube_resources', 'file_resources', 'reports', 'resource_helpful_votes']) LOOP
+  FOR t IN SELECT unnest(ARRAY['youtube_resources', 'file_resources', 'reports', 'resource_helpful_votes']) LOOP
     IF EXISTS (
       SELECT 1 FROM pg_catalog.pg_class c
       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
@@ -1504,7 +1487,7 @@ GRANT SELECT, INSERT ON TABLE public.file_resources TO anon, authenticated;
 -- reports: INSERT only for anon & authenticated. (Public cannot read or modify reports)
 GRANT INSERT ON TABLE public.reports TO anon, authenticated;
 
--- registered_students & resource_helpful_votes: NO DIRECT ACCESS (RPC only).
+-- resource_helpful_votes: NO DIRECT ACCESS (RPC only).
 
 -- ============================================================================
 -- SECTION 6: ROW LEVEL SECURITY (RLS) POLICIES
@@ -1513,22 +1496,7 @@ GRANT INSERT ON TABLE public.reports TO anon, authenticated;
 -- functions running as table owner to execute without RLS policy interference.
 -- ============================================================================
 
--- 1. registered_students: RLS enabled, NO policies (Direct access blocked)
-ALTER TABLE public.registered_students ENABLE ROW LEVEL SECURITY;
-
-DO $$
-DECLARE
-  r RECORD;
-BEGIN
-  FOR r IN (
-    SELECT policyname FROM pg_catalog.pg_policies
-    WHERE schemaname = 'public' AND tablename = 'registered_students'
-  ) LOOP
-    EXECUTE format('DROP POLICY IF EXISTS %I ON public.registered_students', r.policyname);
-  END LOOP;
-END $$;
-
--- 2. resource_helpful_votes: RLS enabled, NO policies (RPC only)
+-- 1. resource_helpful_votes: RLS enabled, NO policies (RPC only)
 ALTER TABLE public.resource_helpful_votes ENABLE ROW LEVEL SECURITY;
 
 DO $$
@@ -1642,141 +1610,6 @@ CREATE POLICY "Public can insert reports"
 -- EXECUTE revoked from public and granted strictly to anon, authenticated.
 -- ============================================================================
 
--- Drop old signatures to ensure clean, unambiguous overload matching
-DROP FUNCTION IF EXISTS public.register_public_student(text, text, text, uuid);
-DROP FUNCTION IF EXISTS public.register_public_student(text, text, text);
-
--- Primary 4-argument implementation (Internal: visitors must not choose their own user_id)
-CREATE OR REPLACE FUNCTION public.register_public_student(
-  p_email text,
-  p_student_id text,
-  p_display_name text,
-  p_user_id uuid
-)
-RETURNS TABLE (
-  user_id uuid,
-  email text,
-  student_id text,
-  display_name text,
-  created_at timestamp with time zone
-)
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-  v_clean_email text;
-  v_clean_student_id text;
-  v_clean_display_name text;
-  v_created_at timestamp with time zone;
-  v_has_conflict boolean := false;
-BEGIN
-  -- 1. Input hygiene
-  v_clean_email := trim(coalesce(p_email, ''));
-  v_clean_student_id := trim(coalesce(p_student_id, ''));
-  v_clean_display_name := trim(coalesce(p_display_name, ''));
-
-  -- 2. Format validation
-  IF length(v_clean_display_name) < 2 OR length(v_clean_display_name) > 80 THEN
-    RAISE EXCEPTION 'Display name must be between 2 and 80 characters' USING ERRCODE = '22000';
-  END IF;
-
-  IF length(v_clean_student_id) < 2 OR length(v_clean_student_id) > 50 THEN
-    RAISE EXCEPTION 'Student ID must be between 2 and 50 characters' USING ERRCODE = '22000';
-  END IF;
-
-  IF v_clean_email !~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$' THEN
-    RAISE EXCEPTION 'A valid email address is required' USING ERRCODE = '22000';
-  END IF;
-
-  -- 3. Duplicate check with uniform error message
-  SELECT (
-    EXISTS (
-      SELECT 1 FROM public.registered_students
-      WHERE lower(trim(registered_students.email)) = lower(v_clean_email)
-    ) OR EXISTS (
-      SELECT 1 FROM public.registered_students
-      WHERE upper(trim(registered_students.student_id)) = upper(v_clean_student_id)
-    )
-  ) INTO v_has_conflict;
-
-  IF v_has_conflict THEN
-    RAISE EXCEPTION 'Registration could not be completed with the provided details. A registration already exists with this email address or student ID.' USING ERRCODE = '23505';
-  END IF;
-
-  -- 4. Insert with nullable user_id (p_user_id is NULL for unauthenticated public visitors)
-  v_created_at := now();
-
-  BEGIN
-    INSERT INTO public.registered_students (
-      student_id,
-      email,
-      display_name,
-      user_id,
-      created_at
-    ) VALUES (
-      v_clean_student_id,
-      v_clean_email,
-      v_clean_display_name,
-      p_user_id,
-      v_created_at
-    );
-  EXCEPTION
-    WHEN unique_violation THEN
-      RAISE EXCEPTION 'Registration could not be completed with the provided details. A registration already exists with this email address or student ID.' USING ERRCODE = '23505';
-  END;
-
-  RETURN QUERY SELECT
-    p_user_id,
-    v_clean_email,
-    v_clean_student_id,
-    v_clean_display_name,
-    v_created_at;
-END;
-$$;
-
--- Visitors must not be able to choose their own user_id; revoked from public, anon, and authenticated
-REVOKE ALL ON FUNCTION public.register_public_student(text, text, text, uuid) FROM PUBLIC, anon, authenticated;
-
--- Compatibility overload for 3-argument callers (frontend public visitors)
-CREATE OR REPLACE FUNCTION public.register_public_student(
-  p_email text,
-  p_student_id text,
-  p_display_name text
-)
-RETURNS TABLE (
-  user_id uuid,
-  email text,
-  student_id text,
-  display_name text,
-  created_at timestamp with time zone
-)
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-BEGIN
-  RETURN QUERY SELECT * FROM public.register_public_student(p_email, p_student_id, p_display_name, NULL::uuid);
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.register_public_student(text, text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.register_public_student(text, text, text) TO anon, authenticated;
-
--- Function: get_registered_student_count
-CREATE OR REPLACE FUNCTION public.get_registered_student_count()
-RETURNS integer
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-  SELECT count(*)::integer FROM public.registered_students;
-$$;
-
-REVOKE ALL ON FUNCTION public.get_registered_student_count() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.get_registered_student_count() TO anon, authenticated;
-
 -- Function: increment_resource_helpful
 -- Concurrency-safe: inserts into public.resource_helpful_votes (resource_kind, resource_id uuid, voter_hash)
 -- with ON CONFLICT (resource_kind, resource_id, voter_hash) DO NOTHING as the atomic latch.
@@ -1881,7 +1714,7 @@ $$;
 REVOKE ALL ON FUNCTION public.increment_resource_helpful(text, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.increment_resource_helpful(text, text, text) TO anon, authenticated;
 
--- Dynamic Legacy Function Revocation: revoke execute on any legacy student listing/profile functions
+-- Dynamic Legacy Function Revocation: revoke execute on internal sync triggers/functions
 DO $$
 DECLARE
   r RECORD;
@@ -1892,11 +1725,6 @@ BEGIN
     JOIN pg_catalog.pg_namespace n ON p.pronamespace = n.oid
     WHERE n.nspname = 'public'
       AND p.proname IN (
-        'get_student_profile',
-        'update_student_display_name',
-        'list_registered_students',
-        'get_all_registered_students',
-        'get_registered_students',
         'sync_youtube_resource_urls',
         'sync_file_resource_paths',
         'sync_report_resource_types'
@@ -1928,27 +1756,33 @@ BEGIN
     IF b.id IS NOT NULL THEN
       IF NOT (
         b.public = true AND
-        coalesce(b.file_size_limit, 0) BETWEEN 1048576 AND 15728640 AND
-        b.allowed_mime_types IS NOT NULL AND
-        (b.allowed_mime_types = ARRAY['application/pdf'] OR (cardinality(b.allowed_mime_types) = 1 AND 'application/pdf' = ANY(b.allowed_mime_types)))
+        coalesce(b.file_size_limit, 0) BETWEEN 1048576 AND 15728640
       ) THEN
-        RAISE EXCEPTION 'Storage bucket "course-files" already exists with incompatible settings (public=%, file_size_limit=%, allowed_mime_types=%). Required: public=true, file_size_limit between 1048576 and 15728640, and allowed_mime_types containing only application/pdf. Do not silently overwrite settings.',
-          b.public, b.file_size_limit, b.allowed_mime_types;
+        RAISE EXCEPTION 'Storage bucket "course-files" already exists with incompatible settings (public=%, file_size_limit=%). Required: public=true, file_size_limit between 1048576 and 15728640.',
+          b.public, b.file_size_limit;
       END IF;
     END IF;
 
-    -- Ensure course-files bucket exists with exact specifications (PDF only, 15MB, public)
+    -- Ensure course-files bucket exists (pdf, ppt, pptx, doc, docx, png, jpg, jpeg up to 15MB, public)
     INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
     VALUES (
       'course-files',
       'course-files',
       true,
       15728640,
-      ARRAY['application/pdf']
+      ARRAY[
+        'application/pdf',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'image/png',
+        'image/jpeg'
+      ]
     )
     ON CONFLICT (id) DO NOTHING;
 
-    -- Scoped storage object policies strictly for course-files (PDF only uploads)
+    -- Scoped storage object policies strictly for course-files
     EXECUTE '
       DROP POLICY IF EXISTS "Public Access for course-files" ON storage.objects;
       DROP POLICY IF EXISTS "Public Upload for course-files" ON storage.objects;
@@ -1959,7 +1793,7 @@ BEGIN
 
       CREATE POLICY "Public Upload for course-files"
         ON storage.objects FOR INSERT
-        WITH CHECK (bucket_id = ''course-files'' AND lower(name) ~ ''\\.pdf$'');
+        WITH CHECK (bucket_id = ''course-files'' AND lower(name) ~ ''\\.(pdf|ppt|pptx|doc|docx|png|jpg|jpeg)$'');
     ';
   END IF;
 END $$;

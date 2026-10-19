@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { AlertCircle, CheckCircle, Flag, LogIn, X } from 'lucide-react';
+import { AlertCircle, CheckCircle, Flag, X } from 'lucide-react';
 import { submitResourceReport } from '../lib/supabase';
-import { RegisteredStudent, ReportReason } from '../types';
+import { ReportReason } from '../types';
 
 interface ReportModalProps {
   isOpen: boolean;
@@ -9,8 +9,6 @@ interface ReportModalProps {
   resourceId: string;
   resourceTitle: string;
   resourceKind: 'youtube' | 'file';
-  currentUser: RegisteredStudent | null;
-  onOpenAuthModal?: () => void;
 }
 
 const REASONS: { label: ReportReason; desc: string }[] = [
@@ -27,8 +25,6 @@ export const ReportModal: React.FC<ReportModalProps> = ({
   resourceId,
   resourceTitle,
   resourceKind,
-  currentUser,
-  onOpenAuthModal,
 }) => {
   const [selectedReason, setSelectedReason] = useState<ReportReason>('Wrong course/segment');
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
@@ -38,19 +34,12 @@ export const ReportModal: React.FC<ReportModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser) {
-      if (onOpenAuthModal) onOpenAuthModal();
-      onClose();
-      return;
-    }
-
     setStatus('submitting');
     setErrorMessage('');
 
     const res = await submitResourceReport({
       resource_id: resourceId,
       resource_kind: resourceKind,
-      reporter_id: currentUser.userId,
       reason: selectedReason,
     });
 
@@ -87,23 +76,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
           </div>
         </div>
 
-        {!currentUser ? (
-          <div className="py-4 space-y-4 text-center">
-            <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-stone-700 leading-relaxed">
-              Please register your Student ID before submitting resource reports to prevent spam and abuse.
-            </div>
-            <button
-              onClick={() => {
-                onClose();
-                if (onOpenAuthModal) onOpenAuthModal();
-              }}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
-            >
-              <LogIn className="w-4 h-4" />
-              <span>Register Student ID</span>
-            </button>
-          </div>
-        ) : status === 'success' ? (
+        {status === 'success' ? (
           <div className="py-8 text-center space-y-2">
             <CheckCircle className="w-12 h-12 text-emerald-600 mx-auto animate-bounce" />
             <h3 className="text-base font-bold text-stone-900">Thanks for reporting</h3>

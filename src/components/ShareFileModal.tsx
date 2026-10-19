@@ -8,18 +8,17 @@ import {
   X
 } from 'lucide-react';
 import { uploadAndAddFileResource } from '../lib/supabase';
-import { Segment, RegisteredStudent } from '../types';
+import { Segment } from '../types';
 
 interface ShareFileModalProps {
   isOpen: boolean;
   onClose: () => void;
   segment: Segment;
   courseId: string;
-  currentUser: RegisteredStudent;
   onResourceAdded: () => void;
 }
 
-const ALLOWED_EXTENSIONS = ['pdf'];
+const ALLOWED_EXTENSIONS = ['pdf', 'ppt', 'pptx', 'doc', 'docx', 'png', 'jpg', 'jpeg'];
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
 
 export const ShareFileModal: React.FC<ShareFileModalProps> = ({
@@ -27,12 +26,12 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
   onClose,
   segment,
   courseId,
-  currentUser,
   onResourceAdded,
 }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [contributorName, setContributorName] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -46,12 +45,12 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
 
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      setErrorMsg(`Invalid file type (.${ext}). Only PDF documents (.pdf) are allowed.`);
+      setErrorMsg(`Invalid file type (.${ext}). Allowed types: ${ALLOWED_EXTENSIONS.join(', ')}.`);
       return;
     }
 
-    if (file.size > MAX_FILE_SIZE) {
-      setErrorMsg(`File size (${(file.size / (1024 * 1024)).toFixed(1)} MB) exceeds maximum allowed limit of 15 MB.`);
+    if (file.size <= 0 || file.size > MAX_FILE_SIZE) {
+      setErrorMsg(`File size (${(file.size / (1024 * 1024)).toFixed(1)} MB) must be between 1 byte and 15 MB.`);
       return;
     }
 
@@ -87,11 +86,13 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
     }
 
     if (!title.trim()) {
-      setErrorMsg('Please provide a title for this file (e.g. Handwritten Lecture Notes).');
+      setErrorMsg('Please provide a title for this file (e.g. Lecture Slides or Notes).');
       return;
     }
 
     setIsUploading(true);
+
+    const finalName = contributorName.trim() || 'Anonymous Student';
 
     const res = await uploadAndAddFileResource({
       file: selectedFile,
@@ -99,8 +100,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
       segmentId: segment.id,
       title: title.trim(),
       description: description.trim(),
-      contributorId: currentUser.userId,
-      contributorName: currentUser.displayName,
+      contributorName: finalName,
     });
 
     setIsUploading(false);
@@ -170,7 +170,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
                 ref={fileInputRef}
                 type="file"
                 className="hidden"
-                accept=".pdf,application/pdf"
+                accept=".pdf,.ppt,.pptx,.doc,.docx,.png,.jpg,.jpeg,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg"
                 onChange={handleFileChange}
               />
 
@@ -189,7 +189,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
                     Click to browse or drag and drop your file here
                   </p>
                   <p className="text-[11px] text-stone-500">
-                    PDF documents only (Max 15 MB)
+                    PDF, PPT, PPTX, DOC, DOCX, PNG, JPG (Max 15 MB)
                   </p>
                 </div>
               )}
@@ -205,7 +205,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Chapter 2: Array Traversals & Binary Search Notes (PDF)"
+              placeholder="e.g. Chapter 2: Array Traversals & Binary Search Notes"
               className="w-full px-3.5 py-2.5 bg-white border border-stone-300 rounded-lg text-xs sm:text-sm text-stone-900 placeholder:text-stone-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
             />
           </div>
@@ -224,13 +224,30 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
             />
           </div>
 
-          {/* Contributor privacy notice */}
+          {/* Contributor Name (Optional) */}
+          <div>
+            <label className="block text-xs font-semibold text-stone-800 mb-1">
+              Contributor Name <span className="text-stone-400 font-normal">(Optional)</span>
+            </label>
+            <input
+              type="text"
+              value={contributorName}
+              onChange={(e) => setContributorName(e.target.value)}
+              placeholder="e.g. Alex (or leave blank for Anonymous Student)"
+              className="w-full px-3.5 py-2.5 bg-white border border-stone-300 rounded-lg text-xs sm:text-sm text-stone-900 placeholder:text-stone-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+            />
+            <p className="text-[11px] text-stone-500 mt-1">
+              Defaults to <strong className="text-stone-700">Anonymous Student</strong>. No registration required.
+            </p>
+          </div>
+
+          {/* Contributor preview notice */}
           <div className="bg-amber-50/80 border border-amber-200/90 rounded-xl p-3 text-[11px] text-amber-900 flex items-center justify-between">
             <span className="flex items-center gap-1.5 font-medium">
               <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-              Uploaded as: <span className="font-bold underline decoration-amber-400">Shared by {currentUser.displayName}</span>
+              Uploaded as: <span className="font-bold underline decoration-amber-400">Shared by {contributorName.trim() || 'Anonymous Student'}</span>
             </span>
-            <span className="text-stone-500 text-[10px]">Student ID kept private</span>
+            <span className="text-stone-500 text-[10px]">Open contribution</span>
           </div>
 
           {errorMsg && (

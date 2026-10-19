@@ -1,9 +1,7 @@
 import React from 'react';
 import { Search, Sparkles } from 'lucide-react';
-import { RegisteredStudent } from '../types';
 
 interface DashboardHeroProps {
-  currentUser: RegisteredStudent | null;
   totalResources: number;
   totalSegments: number;
   searchQuery: string;
@@ -13,7 +11,6 @@ interface DashboardHeroProps {
 }
 
 export const DashboardHero: React.FC<DashboardHeroProps> = ({
-  currentUser,
   totalResources,
   totalSegments,
   searchQuery,
@@ -36,16 +33,14 @@ export const DashboardHero: React.FC<DashboardHeroProps> = ({
 
         {/* Greeting & Subtitle */}
         <h1 className="text-2xl sm:text-4xl font-black text-stone-900 tracking-tight mb-3">
-          {currentUser ? `Welcome back, ${currentUser.displayName} 👋` : 'Welcome to Contributo 👋'}
+          Welcome to Contributo 👋
         </h1>
 
         <p className="text-sm sm:text-base text-stone-700 font-medium mb-1 leading-relaxed">
           Student-shared YouTube videos and files, organized by course and syllabus topic.
         </p>
         <p className="text-xs sm:text-sm text-stone-500 mb-8 leading-relaxed">
-          {currentUser
-            ? 'Contribute study materials, find helpful lectures, and collaborate with your peers.'
-            : 'Browse lectures and materials freely, or register with your Student ID to share resources.'}
+          Contribute study materials, find helpful lectures, and collaborate freely with your peers.
         </p>
 
         {/* Search Bar */}

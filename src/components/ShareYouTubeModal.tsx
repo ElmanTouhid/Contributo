@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import { AlertCircle, CheckCircle2, Film, ListVideo, Sparkles, Video, X } from 'lucide-react';
 import { addYouTubeResource, parseYouTubeUrl } from '../lib/supabase';
-import { ResourceType, Segment, RegisteredStudent } from '../types';
+import { ResourceType, Segment } from '../types';
 
 interface ShareYouTubeModalProps {
   isOpen: boolean;
   onClose: () => void;
   segment: Segment;
   courseId: string;
-  currentUser: RegisteredStudent;
   onResourceAdded: () => void;
 }
 
@@ -17,7 +16,6 @@ export const ShareYouTubeModal: React.FC<ShareYouTubeModalProps> = ({
   onClose,
   segment,
   courseId,
-  currentUser,
   onResourceAdded,
 }) => {
   const [url, setUrl] = useState('');
@@ -25,6 +23,7 @@ export const ShareYouTubeModal: React.FC<ShareYouTubeModalProps> = ({
   const [title, setTitle] = useState('');
   const [topic, setTopic] = useState('');
   const [description, setDescription] = useState('');
+  const [contributorName, setContributorName] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [parsedInfo, setParsedInfo] = useState<{ id: string | null; valid: boolean } | null>(null);
@@ -63,17 +62,27 @@ export const ShareYouTubeModal: React.FC<ShareYouTubeModalProps> = ({
       return;
     }
 
-    if (!title.trim()) {
-      setErrorMsg('Please enter a descriptive title for this lecture or playlist.');
+    const t = title.trim();
+    if (t.length < 3 || t.length > 150) {
+      setErrorMsg('Title must be between 3 and 150 characters.');
       return;
     }
 
-    if (!topic.trim()) {
-      setErrorMsg('Please enter the specific syllabus topic covered (e.g. Binary Search Tree).');
+    const top = topic.trim();
+    if (top.length < 2 || top.length > 100) {
+      setErrorMsg('Topic must be between 2 and 100 characters.');
+      return;
+    }
+
+    const desc = description.trim();
+    if (desc.length > 500) {
+      setErrorMsg('Description must be at most 500 characters.');
       return;
     }
 
     setIsSubmitting(true);
+
+    const finalName = contributorName.trim() || 'Anonymous Student';
 
     const result = await addYouTubeResource({
       course_id: courseId,
@@ -81,11 +90,10 @@ export const ShareYouTubeModal: React.FC<ShareYouTubeModalProps> = ({
       youtube_url: parsed.normalizedUrl,
       youtube_id: parsed.id,
       resource_type: resourceType,
-      title: title.trim(),
-      topic: topic.trim(),
-      description: description.trim(),
-      contributor_id: currentUser.userId,
-      contributor_name: currentUser.displayName,
+      title: t,
+      topic: top,
+      description: desc,
+      contributor_name: finalName,
     });
 
     setIsSubmitting(false);
@@ -221,13 +229,30 @@ export const ShareYouTubeModal: React.FC<ShareYouTubeModalProps> = ({
             />
           </div>
 
-          {/* Contributor privacy disclaimer */}
+          {/* Contributor Name (Optional) */}
+          <div>
+            <label className="block text-xs font-semibold text-stone-800 mb-1">
+              Contributor Name <span className="text-stone-400 font-normal">(Optional)</span>
+            </label>
+            <input
+              type="text"
+              value={contributorName}
+              onChange={(e) => setContributorName(e.target.value)}
+              placeholder="e.g. Alex (or leave blank for Anonymous Student)"
+              className="w-full px-3.5 py-2.5 bg-white border border-stone-300 rounded-lg text-xs sm:text-sm text-stone-900 placeholder:text-stone-400 focus:outline-hidden focus:ring-2 focus:ring-orange-500"
+            />
+            <p className="text-[11px] text-stone-500 mt-1">
+              Defaults to <strong className="text-stone-700">Anonymous Student</strong>. No registration required.
+            </p>
+          </div>
+
+          {/* Contributor preview disclaimer */}
           <div className="bg-amber-50/80 border border-amber-200/90 rounded-xl p-3 text-[11px] text-amber-900 flex items-center justify-between">
             <span className="flex items-center gap-1.5 font-medium">
               <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-              Will be published as: <span className="font-bold underline decoration-amber-400">Shared by {currentUser.displayName}</span>
+              Will be published as: <span className="font-bold underline decoration-amber-400">Shared by {contributorName.trim() || 'Anonymous Student'}</span>
             </span>
-            <span className="text-stone-500 text-[10px]">Student ID is kept private</span>
+            <span className="text-stone-500 text-[10px]">Open contribution</span>
           </div>
 
           {errorMsg && (

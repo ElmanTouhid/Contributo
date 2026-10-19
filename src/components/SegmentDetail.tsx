@@ -19,12 +19,12 @@ import {
   deleteFileResource,
   deleteYouTubeResource,
   fetchSegmentResources,
+  getAuthUserId,
   isSupabaseConfigured
 } from '../lib/supabase';
 import {
   Course,
   FileResource,
-  RegisteredStudent,
   Segment,
   YouTubeResource
 } from '../types';
@@ -38,22 +38,19 @@ import { YouTubeResourceCard } from './YouTubeResourceCard';
 interface SegmentDetailProps {
   course: Course;
   segment: Segment;
-  currentUser: RegisteredStudent | null;
   onBack: () => void;
   onOpenSupabaseSetup: () => void;
-  onOpenAuthModal: () => void;
 }
 
 export const SegmentDetail: React.FC<SegmentDetailProps> = ({
   course,
   segment,
-  currentUser,
   onBack,
   onOpenSupabaseSetup,
-  onOpenAuthModal,
 }) => {
   const isConfigured = isSupabaseConfigured();
   const [activeTab, setActiveTab] = useState<'youtube' | 'files'>('youtube');
+  const [currentUserId, setCurrentUserId] = useState<string>('');
 
   // Resource state
   const [youtubeResources, setYoutubeResources] = useState<YouTubeResource[]>([]);
@@ -87,15 +84,14 @@ export const SegmentDetail: React.FC<SegmentDetailProps> = ({
 
   useEffect(() => {
     loadResources();
+    getAuthUserId().then((uid) => {
+      if (uid) setCurrentUserId(uid);
+    });
   }, [segment.id]);
 
   const handleDeleteYouTube = async (id: string) => {
-    if (!currentUser) {
-      onOpenAuthModal();
-      return;
-    }
     if (confirm('Are you sure you want to delete this shared YouTube resource?')) {
-      const res = await deleteYouTubeResource(id, currentUser.userId);
+      const res = await deleteYouTubeResource(id, currentUserId);
       if (!res.success) {
         alert(res.error || 'Failed to delete resource.');
       } else {
@@ -105,12 +101,8 @@ export const SegmentDetail: React.FC<SegmentDetailProps> = ({
   };
 
   const handleDeleteFile = async (resource: FileResource) => {
-    if (!currentUser) {
-      onOpenAuthModal();
-      return;
-    }
     if (confirm(`Are you sure you want to delete "${resource.title}"?`)) {
-      const res = await deleteFileResource(resource, currentUser.userId);
+      const res = await deleteFileResource(resource, currentUserId);
       if (!res.success) {
         alert(res.error || 'Failed to delete file.');
       } else {
@@ -124,10 +116,6 @@ export const SegmentDetail: React.FC<SegmentDetailProps> = ({
       onOpenSupabaseSetup();
       return;
     }
-    if (!currentUser) {
-      onOpenAuthModal();
-      return;
-    }
     setIsShareYtOpen(true);
   };
 
@@ -136,18 +124,10 @@ export const SegmentDetail: React.FC<SegmentDetailProps> = ({
       onOpenSupabaseSetup();
       return;
     }
-    if (!currentUser) {
-      onOpenAuthModal();
-      return;
-    }
     setIsShareFileOpen(true);
   };
 
   const handleReport = (resource: { id: string; title: string; kind: 'youtube' | 'file' }) => {
-    if (!currentUser) {
-      onOpenAuthModal();
-      return;
-    }
     setReportTarget(resource);
   };
 
@@ -372,7 +352,7 @@ export const SegmentDetail: React.FC<SegmentDetailProps> = ({
                 <YouTubeResourceCard
                   key={res.id}
                   resource={res}
-                  currentUserId={currentUser?.userId || ''}
+                  currentUserId={currentUserId}
                   onDelete={handleDeleteYouTube}
                   onReport={(r) => handleReport({ id: r.id, title: r.title, kind: 'youtube' })}
                 />
@@ -439,7 +419,7 @@ export const SegmentDetail: React.FC<SegmentDetailProps> = ({
                 <FileResourceCard
                   key={res.id}
                   resource={res}
-                  currentUserId={currentUser?.userId || ''}
+                  currentUserId={currentUserId}
                   onDelete={handleDeleteFile}
                   onPreview={(r) => setPreviewFile(r)}
                   onReport={(r) => handleReport({ id: r.id, title: r.title, kind: 'file' })}
@@ -451,31 +431,25 @@ export const SegmentDetail: React.FC<SegmentDetailProps> = ({
       )}
 
       {/* Modals */}
-      {currentUser && (
-        <>
-          <ShareYouTubeModal
-            isOpen={isShareYtOpen}
-            onClose={() => setIsShareYtOpen(false)}
-            segment={segment}
-            courseId={course.id}
-            currentUser={currentUser}
-            onResourceAdded={() => {
-              loadResources();
-            }}
-          />
+      <ShareYouTubeModal
+        isOpen={isShareYtOpen}
+        onClose={() => setIsShareYtOpen(false)}
+        segment={segment}
+        courseId={course.id}
+        onResourceAdded={() => {
+          loadResources();
+        }}
+      />
 
-          <ShareFileModal
-            isOpen={isShareFileOpen}
-            onClose={() => setIsShareFileOpen(false)}
-            segment={segment}
-            courseId={course.id}
-            currentUser={currentUser}
-            onResourceAdded={() => {
-              loadResources();
-            }}
-          />
-        </>
-      )}
+      <ShareFileModal
+        isOpen={isShareFileOpen}
+        onClose={() => setIsShareFileOpen(false)}
+        segment={segment}
+        courseId={course.id}
+        onResourceAdded={() => {
+          loadResources();
+        }}
+      />
 
       {reportTarget && (
         <ReportModal
@@ -484,8 +458,6 @@ export const SegmentDetail: React.FC<SegmentDetailProps> = ({
           resourceId={reportTarget.id}
           resourceTitle={reportTarget.title}
           resourceKind={reportTarget.kind}
-          currentUser={currentUser}
-          onOpenAuthModal={onOpenAuthModal}
         />
       )}
 

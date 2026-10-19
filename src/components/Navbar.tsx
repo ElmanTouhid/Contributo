@@ -1,28 +1,20 @@
 import React from 'react';
 import {
   Bookmark,
-  GraduationCap,
-  ShieldCheck,
-  UserPlus
+  GraduationCap
 } from 'lucide-react';
-import { RegisteredStudent } from '../types';
 
 interface NavbarProps {
-  currentUser: RegisteredStudent | null;
-  authSessionUser?: { id: string; email: string } | null;
   isSupabaseLive: boolean;
   onOpenSupabaseSetup: () => void;
-  onOpenProfile: () => void;
   activeView: 'courses' | 'favorites' | 'syllabus';
   onSelectView: (view: 'courses' | 'favorites' | 'syllabus') => void;
   favoriteCount: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
-  currentUser,
   isSupabaseLive,
   onOpenSupabaseSetup,
-  onOpenProfile,
   activeView,
   onSelectView,
   favoriteCount,
@@ -96,7 +88,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </nav>
 
-          {/* Right Header: Supabase Status & Student Auth / Profile */}
+          {/* Right Header: Supabase Status */}
           <div className="flex items-center gap-2 sm:gap-3">
             {/* Supabase status pill */}
             <button
@@ -118,41 +110,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
               <span className="sm:hidden font-mono text-[11px]">DB</span>
             </button>
-
-            {/* Student Profile / Register Button */}
-            {currentUser ? (
-              <button
-                onClick={onOpenProfile}
-                className="flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl border border-stone-200 bg-white hover:border-orange-300 hover:bg-orange-50/50 transition-all cursor-pointer shadow-2xs"
-              >
-                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-2xs bg-orange-600">
-                  {currentUser.displayName
-                    .split(' ')
-                    .map((n) => n[0])
-                    .slice(-2)
-                    .join('')}
-                </div>
-                <div className="text-left hidden sm:block">
-                  <div className="flex items-center gap-1">
-                    <span className="block text-xs font-bold text-stone-900 leading-tight truncate max-w-[120px]">
-                      {currentUser.displayName}
-                    </span>
-                    <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                  </div>
-                  <span className="block text-[10px] text-stone-500 leading-tight font-mono">
-                    {currentUser.studentId}
-                  </span>
-                </div>
-              </button>
-            ) : (
-              <button
-                onClick={onOpenProfile}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-orange-300 bg-orange-50/80 hover:bg-orange-100 text-orange-950 transition-all cursor-pointer shadow-2xs text-xs font-bold"
-              >
-                <UserPlus className="w-3.5 h-3.5 text-orange-600" />
-                <span>Register Student ID</span>
-              </button>
-            )}
           </div>
         </div>
       </div>

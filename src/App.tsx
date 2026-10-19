@@ -4,29 +4,20 @@ import { CourseDetail } from './components/CourseDetail';
 import { DashboardHero } from './components/DashboardHero';
 import { Navbar } from './components/Navbar';
 import { SegmentDetail } from './components/SegmentDetail';
-import { StudentProfileModal } from './components/StudentProfileModal';
 import { SupabaseSetupBanner, SupabaseSetupModal } from './components/SupabaseSetupModal';
 import { SyllabusInfoView } from './components/SyllabusInfoView';
 import { COURSES } from './data/courses';
 import { SYLLABUS_SEGMENTS } from './data/syllabusSegments';
 import {
-  fetchRegisteredStudent,
-  getLocalStudent,
-  saveLocalStudent
-} from './lib/auth';
-import {
   fetchAllSegments,
   fetchCourseLiveCounts,
   fetchSegmentLiveCounts,
+  initAuthSession,
   isSupabaseConfigured
 } from './lib/supabase';
-import { Course, RegisteredStudent, Segment } from './types';
+import { Course, Segment } from './types';
 
 export default function App() {
-  // Registered Student Profile from localStorage or Supabase
-  const [currentUser, setCurrentUser] = useState<RegisteredStudent | null>(() => getLocalStudent());
-  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-
   // Supabase Setup Modal
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
   const [isSupabaseLive, setIsSupabaseLive] = useState(isSupabaseConfigured);
@@ -81,17 +72,13 @@ export default function App() {
   };
 
   useEffect(() => {
-    loadDatabaseData();
-
-    // If local student exists and Supabase is configured, verify/refresh in background
-    if (currentUser?.userId) {
-      fetchRegisteredStudent(currentUser.userId).then((profile) => {
-        if (profile) {
-          setCurrentUser(profile);
-          saveLocalStudent(profile);
-        }
-      });
-    }
+    const initApp = async () => {
+      if (isSupabaseConfigured()) {
+        await initAuthSession();
+      }
+      await loadDatabaseData();
+    };
+    initApp();
   }, [isSupabaseLive]);
 
   // Compute total live resources across all 8 courses
@@ -160,10 +147,8 @@ export default function App() {
 
       {/* Main Contributo Header */}
       <Navbar
-        currentUser={currentUser}
         isSupabaseLive={isSupabaseLive}
         onOpenSupabaseSetup={() => setIsSupabaseModalOpen(true)}
-        onOpenProfile={() => setIsProfileModalOpen(true)}
         activeView={activeView}
         onSelectView={(view) => {
           setActiveView(view);
@@ -180,10 +165,8 @@ export default function App() {
           <SegmentDetail
             course={selectedCourse}
             segment={selectedSegment}
-            currentUser={currentUser}
             onBack={handleBackToSegments}
             onOpenSupabaseSetup={() => setIsSupabaseModalOpen(true)}
-            onOpenAuthModal={() => setIsProfileModalOpen(true)}
           />
         ) : selectedCourse ? (
           /* ================= Course Detail View (Segments List) ================= */
@@ -205,7 +188,6 @@ export default function App() {
           /* ================= Dashboard / Course Blocks View ================= */
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-fadeIn">
             <DashboardHero
-              currentUser={currentUser}
               totalResources={totalLiveResources}
               totalSegments={segments.length}
               searchQuery={searchQuery}
@@ -310,15 +292,6 @@ export default function App() {
         onClose={() => setIsSupabaseModalOpen(false)}
         onCredentialsUpdated={() => {
           loadDatabaseData();
-        }}
-      />
-
-      <StudentProfileModal
-        isOpen={isProfileModalOpen}
-        onClose={() => setIsProfileModalOpen(false)}
-        currentUser={currentUser}
-        onProfileUpdated={(s) => {
-          setCurrentUser(s);
         }}
       />
     </div>

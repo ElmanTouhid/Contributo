@@ -62,28 +62,11 @@ export interface Report {
   id?: string;
   resource_kind: 'youtube' | 'file';
   resource_id: string;
-  reporter_id: string;
+  reporter_id?: string;
   reason: ReportReason;
   created_at?: string;
 }
 
-export interface RegisteredStudent {
-  userId: string;
-  email: string;
-  universityEmail: string; // backwards compatibility alias for existing components
-  studentId: string;
-  displayName: string;
-  createdAt?: string;
-}
-
-export interface StudentProfile {
-  id: string;
-  displayName: string;
-  universityId: string; // kept private, never displayed on resources
-  department?: string;
-  semester?: string;
-  avatarColor?: string;
-}
 
 export interface SegmentResourceCount {
   segmentId: string;
